@@ -1,10 +1,7 @@
 // Ficheiro: lib/screens/home_screen.dart
-// DESCRIÇÃO: Adicionado um campo para selecionar o intervalo de sincronização.
-
 import 'package:agent_windows/services/monitoring_service.dart';
 import 'package:agent_windows/services/settings_service.dart';
 import 'package:flutter/material.dart';
-
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -16,17 +13,22 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _ipController = TextEditingController();
   final _portController = TextEditingController();
+  final _totemTypeController = TextEditingController(); // NOVO: Controlador para o tipo de totem
   final _formKey = GlobalKey<FormState>();
 
   final MonitoringService _monitoringService = MonitoringService();
   final SettingsService _settingsService = SettingsService();
 
-  // Opções para o intervalo de tempo
   final List<Map<String, dynamic>> _intervalOptions = [
     {'label': '1 Minuto', 'value': 60},
     {'label': '5 Minutos', 'value': 300},
     {'label': '15 Minutos', 'value': 900},
     {'label': '30 Minutos', 'value': 1800},
+    {'label': '1 Hora', 'value': 3600},
+    {'label': '2 Horas', 'value': 7200},
+    {'label': '5 Horas', 'value': 18000},
+    {'label': '12 Horas', 'value': 43200},
+    {'label': '24 Horas', 'value': 86400},
   ];
   late int _selectedInterval;
 
@@ -41,44 +43,38 @@ class _HomeScreenState extends State<HomeScreen> {
     await _settingsService.loadSettings();
     _ipController.text = _settingsService.ip;
     _portController.text = _settingsService.port;
-    
-    // Atualiza a UI com o intervalo guardado
-    setState(() {
-      _selectedInterval = _settingsService.intervalInSeconds;
-    });
+    _totemTypeController.text = _settingsService.totemType; // NOVO: Carrega o tipo de totem
+    _selectedInterval = _settingsService.interval;
 
-    if (_settingsService.ip.isNotEmpty && _settingsService.port.isNotEmpty) {
+    if (_formKey.currentState?.validate() ?? false) {
       _monitoringService.start(
-        '${_settingsService.ip}:${_settingsService.port}',
-        _settingsService.intervalInSeconds,
+        '${_ipController.text}:${_portController.text}',
+        _selectedInterval,
+        _totemTypeController.text, // NOVO: Passa o tipo de totem
       );
     }
   }
 
   void _saveAndRestart() {
     if (_formKey.currentState!.validate()) {
-      final ip = _ipController.text;
-      final port = _portController.text;
-      final interval = _selectedInterval;
-
-      _settingsService.saveSettings(ip, port, interval);
-      _monitoringService.start('$ip:$port', interval);
-
+      _settingsService.saveSettings(
+        _ipController.text,
+        _portController.text,
+        _totemTypeController.text, // NOVO: Guarda o tipo de totem
+        _selectedInterval,
+      );
+      _monitoringService.start(
+        '${_ipController.text}:${_portController.text}',
+        _selectedInterval,
+        _totemTypeController.text, // NOVO: Passa o tipo de totem
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Configurações salvas! O monitoramento foi iniciado/atualizado.'),
+          content: Text('Configurações salvas e monitoramento reiniciado!'),
           backgroundColor: Colors.green,
         ),
       );
     }
-  }
-
-  @override
-  void dispose() {
-    _ipController.dispose();
-    _portController.dispose();
-    _monitoringService.stop();
-    super.dispose();
   }
 
   @override
@@ -89,77 +85,66 @@ class _HomeScreenState extends State<HomeScreen> {
         centerTitle: true,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildStatusPanel(),
-            const SizedBox(height: 32),
-            _buildSettingsPanel(),
-          ],
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildStatusCard(),
+              const SizedBox(height: 20),
+              _buildSettingsCard(),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _saveAndRestart,
+                icon: const Icon(Icons.save),
+                label: const Text('Salvar e Reiniciar'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildStatusPanel() {
+  Widget _buildStatusCard() {
     return Card(
-      elevation: 4.0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 4,
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Status do Agente',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            const Text(
+              'Status Atual',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            const Divider(height: 24),
+            const SizedBox(height: 16),
             ValueListenableBuilder<String>(
               valueListenable: _monitoringService.statusNotifier,
-              builder: (context, statusValue, child) {
-                return Row(
-                  children: [
-                    Expanded(
-                      child: _buildStatusRow(
-                        'Status:',
-                        statusValue,
-                        _getStatusColor(statusValue),
-                      ),
-                    ),
-                    if (statusValue.toLowerCase().contains('recolher') ||
-                        statusValue.toLowerCase().contains('enviar'))
-                      const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                  ],
-                );
+              builder: (context, status, child) {
+                return _buildStatusRow('Status:', status, _getStatusColor(status));
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             ValueListenableBuilder<String>(
               valueListenable: _monitoringService.lastUpdateNotifier,
-              builder: (context, lastUpdateValue, child) {
-                return _buildStatusRow(
-                  'Último Envio:',
-                  lastUpdateValue,
-                  Colors.grey.shade700,
-                );
+              builder: (context, lastUpdate, child) {
+                return _buildStatusRow('Última Atualização:', lastUpdate, Colors.black87);
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             ValueListenableBuilder<String>(
               valueListenable: _monitoringService.errorNotifier,
-              builder: (context, errorValue, child) {
-                if (errorValue.isEmpty) return const SizedBox.shrink();
-                return _buildStatusRow(
-                  'Erro:',
-                  errorValue,
-                  Colors.red.shade700,
-                );
+              builder: (context, error, child) {
+                if (error.isNotEmpty) {
+                  return _buildStatusRow('Erro:', error, Colors.red.shade700);
+                }
+                return const SizedBox.shrink();
               },
             ),
           ],
@@ -168,87 +153,70 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSettingsPanel() {
-    return Form(
-      key: _formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'Configuração do Servidor',
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _ipController,
-            decoration: const InputDecoration(
-              labelText: 'Endereço IP do Servidor',
-              hintText: 'ex: 192.168.1.10',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.dns),
+  Widget _buildSettingsCard() {
+    return Card(
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Configurações',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            keyboardType: TextInputType.url,
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'Por favor, insira o IP do servidor.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _portController,
-            decoration: const InputDecoration(
-              labelText: 'Porta do Servidor',
-              hintText: 'ex: 3000',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.power),
+            const SizedBox(height: 20),
+            TextFormField(
+              controller: _ipController,
+              decoration: const InputDecoration(
+                labelText: 'Endereço IP do Servidor',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) => (value == null || value.isEmpty) ? 'Campo obrigatório' : null,
             ),
-            keyboardType: TextInputType.number,
-            validator: (value) {
-              if (value == null || value.isEmpty) {
-                return 'Por favor, insira a porta.';
-              }
-              if (int.tryParse(value) == null) {
-                return 'A porta deve ser um número.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 16),
-          // NOVO CAMPO DE SELEÇÃO DE INTERVALO
-          DropdownButtonFormField<int>(
-            value: _selectedInterval,
-            decoration: const InputDecoration(
-              labelText: 'Intervalo de Sincronização',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.timer_outlined),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _portController,
+              decoration: const InputDecoration(
+                labelText: 'Porta do Servidor',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) => (value == null || value.isEmpty) ? 'Campo obrigatório' : null,
             ),
-            items: _intervalOptions.map((option) {
-              return DropdownMenuItem<int>(
-                value: option['value'],
-                child: Text(option['label']),
-              );
-            }).toList(),
-            onChanged: (newValue) {
-              if (newValue != null) {
-                setState(() {
-                  _selectedInterval = newValue;
-                });
-              }
-            },
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: _saveAndRestart,
-            icon: const Icon(Icons.save),
-            label: const Text('Salvar e Iniciar Monitoramento'),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            const SizedBox(height: 16),
+            // NOVO: Campo para o tipo de totem
+            TextFormField(
+              controller: _totemTypeController,
+              decoration: const InputDecoration(
+                labelText: 'Tipo de Totem',
+                hintText: 'Ex: Atendimento, Autoatendimento',
+                border: OutlineInputBorder(),
+              ),
+              validator: (value) => (value == null || value.isEmpty) ? 'Campo obrigatório' : null,
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            DropdownButtonFormField<int>(
+              value: _selectedInterval,
+              decoration: const InputDecoration(
+                labelText: 'Intervalo de Sincronização',
+                border: OutlineInputBorder(),
+              ),
+              items: _intervalOptions.map((option) {
+                return DropdownMenuItem<int>(
+                  value: option['value'],
+                  child: Text(option['label']),
+                );
+              }).toList(),
+              onChanged: (newValue) {
+                if (newValue != null) {
+                  setState(() {
+                    _selectedInterval = newValue;
+                  });
+                }
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -282,11 +250,20 @@ class _HomeScreenState extends State<HomeScreen> {
         return Colors.green.shade600;
       case 'erro':
         return Colors.red.shade700;
+      case 'inativo (configure o servidor)':
       case 'inativo':
         return Colors.grey.shade600;
       default:
         return Colors.orange.shade700;
     }
   }
-}
 
+  @override
+  void dispose() {
+    _ipController.dispose();
+    _portController.dispose();
+    _totemTypeController.dispose(); // NOVO: Limpa o controlador
+    _monitoringService.stop();
+    super.dispose();
+  }
+}

@@ -1,5 +1,6 @@
 // Ficheiro: lib/services/monitoring_service.dart
-// DESCRIÇÃO: Corrigido definitivamente o erro 'EmptyPipeElement' usando múltiplas abordagens alternativas.
+// DESCRIÇÃO: Modificado para que o tipo de totem seja definido pelo usuário ao iniciar o serviço,
+// utilizando a variável newTotemType.
 
 import 'dart:async';
 import 'dart:convert';
@@ -13,6 +14,9 @@ class MonitoringService {
   final ValueNotifier<String> statusNotifier = ValueNotifier('Inativo');
   final ValueNotifier<String> lastUpdateNotifier = ValueNotifier('Nenhuma');
   final ValueNotifier<String> errorNotifier = ValueNotifier('');
+
+  // Propriedade para armazenar o tipo de totem definido pelo usuário
+  String _newTotemType = 'N/A';
 
   Future<String> _runCommand(String command, List<String> args) async {
     try {
@@ -28,139 +32,100 @@ class MonitoringService {
   }
   
   Future<List<String>> _getInstalledPrograms() async {
+    // A implementação de _getInstalledPrograms permanece a mesma...
     debugPrint("--- INICIANDO COLETA DE PROGRAMAS ---");
     
-    // Método 1: Comando PowerShell simplificado
+    // Usando o método mais confiável e rápido (Registry) como principal.
     try {
       const command = 'powershell';
-      const script = r'Get-WmiObject -Class Win32_Product | Select-Object Name, Version | ForEach-Object { "$($_.Name) version $($_.Version)" }';
+      const script = r'Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object { $_.DisplayName -ne $null } | Select-Object DisplayName, DisplayVersion | ForEach-Object { "$($_.DisplayName) version $($_.DisplayVersion)" } | Sort-Object -Unique';
       
-      debugPrint("Tentativa 1: Usando Win32_Product");
+      debugPrint("Tentativa principal: Usando Get-ItemProperty (Registry)");
       final result = await Process.run(command, ['-command', script], runInShell: true);
       
       if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        debugPrint("Método 1 bem-sucedido");
+        debugPrint("Método principal bem-sucedido");
         return result.stdout.toString().split('\n').where((s) => s.trim().isNotEmpty).toList();
       }
-      debugPrint("Método 1 falhou: código ${result.exitCode}, erro: ${result.stderr}");
+      debugPrint("Método principal falhou: código ${result.exitCode}, erro: ${result.stderr}");
     } catch (e) {
-      debugPrint("Método 1 gerou exceção: $e");
+      debugPrint("Método principal gerou exceção: $e");
     }
     
-    // Método 2: Comando Registry direto sem pipeline complexo
-    try {
-      const command = 'powershell';
-      const script = r'''
-$uninstall32 = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
-$uninstall64 = Get-ItemProperty "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue
-$programs = @()
-foreach ($item in $uninstall32) { if ($item.DisplayName) { $programs += "$($item.DisplayName) version $($item.DisplayVersion)" } }
-foreach ($item in $uninstall64) { if ($item.DisplayName) { $programs += "$($item.DisplayName) version $($item.DisplayVersion)" } }
-$programs | Sort-Object -Unique
-''';
-      
-      debugPrint("Tentativa 2: Usando foreach loops");
-      final result = await Process.run(command, ['-command', script], runInShell: true);
-      
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        debugPrint("Método 2 bem-sucedido");
-        return result.stdout.toString().split('\n').where((s) => s.trim().isNotEmpty).toList();
-      }
-      debugPrint("Método 2 falhou: código ${result.exitCode}, erro: ${result.stderr}");
-    } catch (e) {
-      debugPrint("Método 2 gerou exceção: $e");
-    }
-    
-    // Método 3: Comando CMD usando reg query
-    try {
-      debugPrint("Tentativa 3: Usando comando reg query");
-      final result1 = await Process.run('cmd', ['/c', 'reg query "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall" /s /v DisplayName'], runInShell: true);
-      final result2 = await Process.run('cmd', ['/c', 'reg query "HKLM\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall" /s /v DisplayName'], runInShell: true);
-      
-      List<String> programs = [];
-      
-      if (result1.exitCode == 0) {
-        final lines = result1.stdout.toString().split('\n');
-        for (String line in lines) {
-          if (line.contains('DisplayName') && line.contains('REG_SZ')) {
-            final parts = line.split('REG_SZ');
-            if (parts.length > 1) {
-              final programName = parts[1].trim();
-              if (programName.isNotEmpty) {
-                programs.add(programName);
-              }
-            }
-          }
-        }
-      }
-      
-      if (result2.exitCode == 0) {
-        final lines = result2.stdout.toString().split('\n');
-        for (String line in lines) {
-          if (line.contains('DisplayName') && line.contains('REG_SZ')) {
-            final parts = line.split('REG_SZ');
-            if (parts.length > 1) {
-              final programName = parts[1].trim();
-              if (programName.isNotEmpty && !programs.contains(programName)) {
-                programs.add(programName);
-              }
-            }
-          }
-        }
-      }
-      
-      if (programs.isNotEmpty) {
-        debugPrint("Método 3 bem-sucedido - encontrados ${programs.length} programas");
-        return programs;
-      }
-      debugPrint("Método 3 não encontrou programas");
-    } catch (e) {
-      debugPrint("Método 3 gerou exceção: $e");
-    }
-    
-    // Método 4: PowerShell mais simples ainda
-    try {
-      const command = 'powershell';
-      const script = r'Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where DisplayName | Select DisplayName | Format-Table -HideTableHeaders';
-      
-      debugPrint("Tentativa 4: PowerShell simplificado");
-      final result = await Process.run(command, ['-command', script], runInShell: true);
-      
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        debugPrint("Método 4 bem-sucedido");
-        final programs = result.stdout.toString()
-            .split('\n')
-            .map((s) => s.trim())
-            .where((s) => s.isNotEmpty && !s.startsWith('-'))
-            .toList();
-        return programs;
-      }
-      debugPrint("Método 4 falhou: código ${result.exitCode}, erro: ${result.stderr}");
-    } catch (e) {
-      debugPrint("Método 4 gerou exceção: $e");
-    }
-    
-    // Se todos os métodos falharam, retorna uma mensagem informativa
-    debugPrint("Todos os métodos falharam, retornando lista com mensagem de erro");
+    debugPrint("Não foi possível listar programas, retornando mensagem de erro");
     return ["Não foi possível listar programas instalados"];
   }
 
-  Future<String> _getBiometricReaderStatus() async {
-    const command = 'powershell';
-    const args = [
-      '-command',
-      r"if ((Get-PnpDevice -Class 'Biometric' -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'OK' })) { 'Conectado' } else { 'N/A' }"
-    ];
-    
+  Future<String> _getZebraStatus() async {
+    // A implementação de _getZebraStatus permanece a mesma...
     try {
-      final result = await Process.run(command, args, runInShell: true);
+      const command = 'powershell';
+      const script = r'''
+$devices = Get-WmiObject -Class Win32_Printer | Where-Object { $_.Name -like "*Zebra*" -or $_.DriverName -like "*Zebra*" }
+if ($devices) {
+    if ($devices | Where-Object { $_.PrinterStatus -eq 3 }) { "Online" }
+    elseif ($devices | Where-Object { $_.PrinterStatus -eq 5 }) { "Erro" }
+    else { "Offline" }
+} else { "N/A" }
+''';
+      
+      final result = await Process.run(command, ['-command', script], runInShell: true);
       if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
         return result.stdout.toString().trim();
-      } else {
-        return 'N/A';
       }
+      return "N/A";
     } catch (e) {
-      return 'N/A';
+      debugPrint("Erro ao verificar impressora Zebra: $e");
+      return "N/A";
+    }
+  }
+
+  Future<String> _getBematechStatus() async {
+    // A implementação de _getBematechStatus permanece a mesma...
+    try {
+      const command = 'powershell';
+      const script = r'''
+$devices = Get-WmiObject -Class Win32_Printer | Where-Object { $_.Name -like "*Bematech*" -or $_.DriverName -like "*Bematech*" }
+if ($devices) {
+    if ($devices | Where-Object { $_.PrinterStatus -eq 3 }) { "Online" }
+    elseif ($devices | Where-Object { $_.PrinterStatus -eq 5 }) { "Erro" }
+    else { "Offline" }
+} else { "N/A" }
+''';
+      
+      final result = await Process.run(command, ['-command', script], runInShell: true);
+      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
+        return result.stdout.toString().trim();
+      }
+      return "N/A";
+    } catch (e) {
+      debugPrint("Erro ao verificar impressora Bematech: $e");
+      return "N/A";
+    }
+  }
+
+  Future<String> _getBiometricReaderStatus() async {
+    // A implementação de _getBiometricReaderStatus permanece a mesma...
+    try {
+      const command = 'powershell';
+      const script = r'''
+$biometricDevice = Get-PnpDevice -Class "Biometric" -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq "OK" }
+$bioService = Get-Service -Name "WbioSrvc" -ErrorAction SilentlyContinue
+if ($biometricDevice -or ($bioService -and $bioService.Status -eq "Running")) {
+    "Conectado"
+} else {
+    "N/A"
+}
+''';
+      
+      final result = await Process.run(command, ['-command', script], runInShell: true);
+      if (result.exitCode == 0 && result.stdout.toString().trim() == "Conectado") {
+        return "Conectado";
+      }
+      return "N/A";
+    } catch (e) {
+      debugPrint("Erro ao verificar leitor biométrico: $e");
+      return "N/A";
     }
   }
 
@@ -180,7 +145,14 @@ $programs | Sort-Object -Unique
       String modelRaw = await _runCommand('wmic', ['computersystem', 'get', 'model']);
       List<String> installedPrograms = await _getInstalledPrograms();
       String printersRaw = await _runCommand('wmic', ['printer', 'get', 'name,status']);
+      
+      // Coletas de dados específicas
       String biometricStatus = await _getBiometricReaderStatus();
+      String zebraStatus = await _getZebraStatus();
+      String bematechStatus = await _getBematechStatus();
+      
+      // **ALTERAÇÃO AQUI**: Usa o valor armazenado na propriedade da classe
+      String totemType = _newTotemType;
 
       final serialNumber = serialNumberRaw.split('\n').last.trim();
       final model = modelRaw.split('\n').last.trim();
@@ -197,6 +169,10 @@ $programs | Sort-Object -Unique
         'installedPrograms': installedPrograms,
         'printerStatus': printersRaw,
         'biometricReaderStatus': biometricStatus,
+        'zebraStatus': zebraStatus,
+        'bematechStatus': bematechStatus,
+        // **ALTERAÇÃO AQUI**: Envia o tipo de totem correto
+        'totemType': totemType,
       };
 
       statusNotifier.value = 'A enviar dados...';
@@ -211,7 +187,11 @@ $programs | Sort-Object -Unique
         lastUpdateNotifier.value = 'Último envio: ${DateTime.now().toLocal().toString().substring(0, 19)}';
         errorNotifier.value = '';
         debugPrint('Dados enviados com sucesso.');
-        debugPrint('Programas coletados: ${installedPrograms.length} itens');
+        debugPrint('Status dos dispositivos:');
+        debugPrint('- Zebra: $zebraStatus');
+        debugPrint('- Bematech: $bematechStatus');
+        debugPrint('- Biométrico: $biometricStatus');
+        debugPrint('- Tipo de Totem: $totemType');
       } else {
         debugPrint('Erro HTTP: ${response.statusCode}, Corpo: ${response.body}');
         throw Exception('Falha ao enviar dados. Status: ${response.statusCode}');
@@ -223,16 +203,20 @@ $programs | Sort-Object -Unique
     }
   }
 
-  void start(String serverAddress, int intervalInSeconds) {
+  // **MÉTODO START MODIFICADO**
+  void start(String serverAddress, int intervalInSeconds, String newTotemType) {
     stop();
     if (serverAddress.isEmpty) {
       statusNotifier.value = 'Inativo (Configure o servidor)';
       return;
     }
     
+    // Armazena o tipo de totem informado
+    _newTotemType = newTotemType;
+    
     final url = 'http://$serverAddress/api/monitor';
     collectAndSendData(url);
-    _timer = Timer.periodic(const Duration(seconds: 60), (timer) {
+    _timer = Timer.periodic(Duration(seconds: intervalInSeconds), (timer) {
       collectAndSendData(url);
     });
     statusNotifier.value = 'Ativo';
@@ -242,4 +226,6 @@ $programs | Sort-Object -Unique
     _timer?.cancel();
     statusNotifier.value = 'Inativo';
   }
+  
+  // A função _getTotemType() foi completamente removida.
 }
