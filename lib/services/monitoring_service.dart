@@ -1,5 +1,5 @@
 // Ficheiro: lib/services/monitoring_service.dart
-// DESCRIÇÃO: Código melhorado com detecção mais robusta de dispositivos
+// DESCRIÇÃO: Adicionado log detalhado da lista de programas instalados para depuração.
 
 import 'dart:async';
 import 'dart:convert';
@@ -14,18 +14,29 @@ class MonitoringService {
   final ValueNotifier<String> lastUpdateNotifier = ValueNotifier('Nenhuma');
   final ValueNotifier<String> errorNotifier = ValueNotifier('');
 
-  // Propriedade para armazenar o tipo de totem definido pelo usuário
   String _newTotemType = 'N/A';
+
+  String _decodeOutput(dynamic output) {
+    if (output is List<int>) {
+      return latin1.decode(output);
+    }
+    return output.toString();
+  }
 
   Future<String> _runCommand(String command, List<String> args) async {
     try {
       final result = await Process.run(command, args, runInShell: true);
+      final stdoutString = _decodeOutput(result.stdout);
+      final stderrString = _decodeOutput(result.stderr);
+
       if (result.exitCode == 0) {
-        return result.stdout.toString().trim();
+        return stdoutString.trim();
       } else {
-        return "Erro ao executar comando: ${result.stderr}";
+        debugPrint("Erro ao executar comando: '$command ${args.join(' ')}'. Stderr: $stderrString");
+        return "Erro ao executar comando: $stderrString";
       }
     } catch (e) {
+      debugPrint("Exceção no comando: '$command ${args.join(' ')}'. Erro: $e");
       return "Exceção no comando: $e";
     }
   }
@@ -34,11 +45,8 @@ class MonitoringService {
     try {
       const command = 'powershell';
       const script = r'Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty TotalPhysicalMemory | ForEach-Object { "$([math]::Round($_ / 1GB)) GB" }';
-      final result = await Process.run(command, ['-command', script], runInShell: true);
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        return result.stdout.toString().trim();
-      }
-      return "N/A";
+      final result = await _runCommand(command, ['-command', script]);
+      return result.isNotEmpty ? result : "N/A";
     } catch (e) {
       debugPrint("Erro ao obter informações de RAM: $e");
       return "N/A";
@@ -49,11 +57,8 @@ class MonitoringService {
     try {
       const command = 'powershell';
       const script = r'(Get-PhysicalDisk | Select-Object -First 1).MediaType';
-      final result = await Process.run(command, ['-command', script], runInShell: true);
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        return result.stdout.toString().trim();
-      }
-      return "N/A";
+      final result = await _runCommand(command, ['-command', script]);
+      return result.isNotEmpty ? result : "N/A";
     } catch (e) {
       debugPrint("Erro ao obter o tipo de HD: $e");
       return "N/A";
@@ -64,11 +69,8 @@ class MonitoringService {
     try {
       const command = 'powershell';
       const script = r'Get-Volume -DriveLetter C | ForEach-Object { "Total: " + [math]::Round($_.Size / 1GB) + " GB, Livre: " + [math]::Round($_.SizeRemaining / 1GB) + " GB" }';
-      final result = await Process.run(command, ['-command', script], runInShell: true);
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        return result.stdout.toString().trim();
-      }
-      return "N/A";
+      final result = await _runCommand(command, ['-command', script]);
+      return result.isNotEmpty ? result : "N/A";
     } catch (e) {
       debugPrint("Erro ao obter informações de armazenamento do HD: $e");
       return "N/A";
@@ -81,14 +83,21 @@ class MonitoringService {
       const command = 'powershell';
       const script = r'Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object { $_.DisplayName -ne $null } | Select-Object DisplayName, DisplayVersion | ForEach-Object { "$($_.DisplayName) version $($_.DisplayVersion)" } | Sort-Object -Unique';
       
-      debugPrint("Tentativa principal: Usando Get-ItemProperty (Registry)");
-      final result = await Process.run(command, ['-command', script], runInShell: true);
-      
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
+      final result = await _runCommand(command, ['-command', script]);
+      if (result.isNotEmpty && !result.startsWith("Erro")) {
         debugPrint("Método principal bem-sucedido");
-        return result.stdout.toString().split('\n').where((s) => s.trim().isNotEmpty).toList();
+        final programs = result.split('\n').where((s) => s.trim().isNotEmpty).toList();
+        
+        // --- AJUSTE AQUI ---
+        debugPrint("--- LISTA DE PROGRAMAS ENCONTRADOS ---");
+        for (var program in programs) {
+          debugPrint("- $program");
+        }
+        debugPrint("--- FIM DA LISTA DE PROGRAMAS ---");
+        // --- FIM DO AJUSTE ---
+
+        return programs;
       }
-      debugPrint("Método principal falhou: código ${result.exitCode}, erro: ${result.stderr}");
     } catch (e) {
       debugPrint("Método principal gerou exceção: $e");
     }
@@ -97,182 +106,118 @@ class MonitoringService {
     return ["Não foi possível listar programas instalados"];
   }
 
-  // --- MÉTODOS DE DETECÇÃO MELHORADOS ---
-
-  Future<String> _getZebraStatus() async {
-    try {
-      const command = 'powershell';
-      const script = r'''
-$devices = Get-WmiObject -Class Win32_Printer | Where-Object { $_.Name -like "*ZDesigner GC420t (EPL)*" }
-if ($devices) {
-    $device = $devices | Select-Object -First 1
-    switch ($device.PrinterStatus) {
-        1 { "Outro" }
-        2 { "Desconhecido" }
-        3 { "Online" }
-        4 { "Offline" }
-        5 { "Erro" }
-        6 { "Teste" }
-        7 { "Energia Baixa" }
-        default { "Status: $($device.PrinterStatus)" }
-    }
-} else { "N/A" }
-''';
-      
-      final result = await Process.run(command, ['-command', script], runInShell: true);
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        return result.stdout.toString().trim();
-      }
-      return "N/A";
-    } catch (e) {
-      debugPrint("Erro ao verificar impressora Zebra: $e");
-      return "N/A";
-    }
-  }
-
-  Future<String> _getBematechStatus() async {
-    try {
-      const command = 'powershell';
-      const script = r'''
-$devices = Get-WmiObject -Class Win32_Printer | Where-Object { $_.Name -like "*MP-4200 TH*" }
-if ($devices) {
-    $device = $devices | Select-Object -First 1
-    switch ($device.PrinterStatus) {
-        1 { "Outro" }
-        2 { "Desconhecido" }
-        3 { "Online" }
-        4 { "Offline" }
-        5 { "Erro" }
-        6 { "Teste" }
-        7 { "Energia Baixa" }
-        default { "Status: $($device.PrinterStatus)" }
-    }
-} else { "N/A" }
-''';
-      
-      final result = await Process.run(command, ['-command', script], runInShell: true);
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        return result.stdout.toString().trim();
-      }
-      return "N/A";
-    } catch (e) {
-      debugPrint("Erro ao verificar impressora Bematech: $e");
-      return "N/A";
-    }
-  }
-
-  Future<String> _getBiometricReaderStatus() async {
-    try {
-      const command = 'powershell';
-      const script = r'''
-$biometricDevices = Get-PnpDevice | Where-Object { $_.FriendlyName -like "*U.are.U® 4500*" }
-if ($biometricDevices) {
-    $okDevices = $biometricDevices | Where-Object { $_.Status -eq "OK" }
-    $unknownDevices = $biometricDevices | Where-Object { $_.Status -eq "Unknown" }
-    
-    if ($okDevices) {
-        "Conectado (OK)"
-    } elseif ($unknownDevices) {
-        "Conectado (Unknown)"
-    } else {
-        $status = ($biometricDevices | Select-Object -First 1).Status
-        "Conectado ($status)"
-    }
-} else {
-    "N/A"
-}
-''';
-      
-      final result = await Process.run(command, ['-command', script], runInShell: true);
-      if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
-        return result.stdout.toString().trim();
-      }
-      return "N/A";
-    } catch (e) {
-      debugPrint("Erro ao verificar leitor biométrico: $e");
-      return "N/A";
-    }
-  }
-
-  // Método adicional para verificar todos os dispositivos de uma só vez
   Future<Map<String, String>> _getAllDeviceStatus() async {
-    try {
-      const command = 'powershell';
-      const script = r'''
-# Verificar impressoras
+    const String scriptContent = r'''
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
+Write-Output "--- INICIANDO SCRIPT DE DETECÇÃO DE DISPOSITIVOS (V FINAL) ---"
 $zebraStatus = "N/A"
 $bematechStatus = "N/A"
 $biometricStatus = "N/A"
 
-# Zebra
-$zebraDevices = Get-WmiObject -Class Win32_Printer | Where-Object { $_.Name -like "*ZDesigner GC420t (EPL)*" }
-if ($zebraDevices) {
-    $device = $zebraDevices | Select-Object -First 1
-    switch ($device.PrinterStatus) {
-        3 { $zebraStatus = "Online" }
-        4 { $zebraStatus = "Offline" }
-        5 { $zebraStatus = "Erro" }
-        default { $zebraStatus = "Status: $($device.PrinterStatus)" }
+function Get-PrinterStatusString($status) {
+    switch ($status) {
+        1 { return "Outro" }
+        2 { return "Desconhecido" }
+        3 { return "Online" }
+        4 { return "Imprimindo" }
+        5 { return "Aquecendo" }
+        6 { return "Parado" }
+        7 { return "Offline" }
+        default { return "Status: $status" }
     }
 }
 
-# Bematech
-$bematechDevices = Get-WmiObject -Class Win32_Printer | Where-Object { $_.Name -like "*MP-4200 TH*" }
-if ($bematechDevices) {
-    $device = $bematechDevices | Select-Object -First 1
-    switch ($device.PrinterStatus) {
-        3 { $bematechStatus = "Online" }
-        4 { $bematechStatus = "Offline" }
-        5 { $bematechStatus = "Erro" }
-        default { $bematechStatus = "Status: $($device.PrinterStatus)" }
-    }
-}
+try {
+    Write-Output "---[LOG]--- Buscando impressoras..."
+    $printers = Get-WmiObject -Class Win32_Printer -ErrorAction Stop
+    if ($printers) {
+        $zebraDevice = $printers | Where-Object { $_.Name -like "*ZDesigner*" } | Select-Object -First 1
+        if ($zebraDevice) {
+            $zebraStatus = Get-PrinterStatusString -status $zebraDevice.PrinterStatus
+            Write-Output "---[LOG]--- Zebra encontrada: $($zebraDevice.Name), Status: $zebraStatus"
+        } else { Write-Output "---[LOG]--- Nenhuma Zebra encontrada." }
+        
+        $bematechDevice = $printers | Where-Object { $_.Name -like "*MP-4200*" } | Select-Object -First 1
+        if ($bematechDevice) {
+            $bematechStatus = Get-PrinterStatusString -status $bematechDevice.PrinterStatus
+            Write-Output "---[LOG]--- Bematech encontrada: $($bematechDevice.Name), Status: $bematechStatus"
+        } else { Write-Output "---[LOG]--- Nenhuma Bematech encontrada." }
+    } else { Write-Output "---[LOG]--- Nenhuma impressora retornada." }
+} catch { Write-Output "---[ERRO]--- Falha ao buscar impressoras: $_" }
 
-# Biométrico
-$biometricDevices = Get-PnpDevice | Where-Object { $_.FriendlyName -like "*U.are.U® 4500*" }
-if ($biometricDevices) {
-    $okDevices = $biometricDevices | Where-Object { $_.Status -eq "OK" }
-    if ($okDevices) {
-        $biometricStatus = "Conectado"
+try {
+    Write-Output "---[LOG]--- Buscando leitor biométrico..."
+    $biometricDevice = Get-PnpDevice -Class "Biometric" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($biometricDevice) {
+        Write-Output "---[LOG]--- Leitor encontrado por classe: $($biometricDevice.FriendlyName), Status: $($biometricDevice.Status)"
+        $biometricStatus = if ($biometricDevice.Status -eq "OK") { "Conectado" } else { "Detectado" }
     } else {
-        $biometricStatus = "Detectado (verificar status)"
+        Write-Output "---[LOG]--- Não encontrado por classe. Buscando por nome..."
+        $biometricDeviceByName = Get-PnpDevice | Where-Object { $_.FriendlyName -like "*U are U*4500*" } | Select-Object -First 1
+        if ($biometricDeviceByName) {
+             Write-Output "---[LOG]--- Leitor encontrado por nome: $($biometricDeviceByName.FriendlyName), Status: $($biometricDeviceByName.Status)"
+            $biometricStatus = if ($biometricDeviceByName.Status -eq "OK") { "Conectado" } else { "Detectado" }
+        } else { Write-Output "---[LOG]--- Leitor não encontrado." }
     }
-}
+} catch { Write-Output "---[ERRO]--- Falha ao buscar leitor biométrico: $_" }
 
-Write-Output "ZEBRA:$zebraStatus"
-Write-Output "BEMATECH:$bematechStatus"
-Write-Output "BIOMETRIC:$biometricStatus"
+Write-Output "---[RESULT]---ZEBRA: $($zebraStatus)"
+Write-Output "---[RESULT]---BEMATECH: $($bematechStatus)"
+Write-Output "---[RESULT]---BIOMETRIC: $($biometricStatus)"
 ''';
+
+    final tempDir = Directory.systemTemp;
+    final scriptFile = File('${tempDir.path}\\monitor_script.ps1');
+    
+    try {
+      await scriptFile.writeAsString(scriptContent, flush: true, encoding: utf8);
+
+      final result = await Process.run(
+        'powershell',
+        ['-ExecutionPolicy', 'Bypass', '-File', scriptFile.path],
+        runInShell: true,
+      );
       
-      final result = await Process.run(command, ['-command', script], runInShell: true);
+      final stdoutString = _decodeOutput(result.stdout);
+      final stderrString = _decodeOutput(result.stderr);
+
+      debugPrint("--- SAÍDA DO SCRIPT (DECODIFICADA) ---");
+      debugPrint(stdoutString);
+      if (stderrString.isNotEmpty) {
+        debugPrint("--- ERROS DO SCRIPT (DECODIFICADOS) ---");
+        debugPrint(stderrString);
+      }
+      debugPrint("--- FIM DA SAÍDA DO SCRIPT ---");
+
+      Map<String, String> statuses = {'zebra': 'N/A', 'bematech': 'N/A', 'biometric': 'N/A'};
       
-      Map<String, String> statuses = {
-        'zebra': 'N/A',
-        'bematech': 'N/A',
-        'biometric': 'N/A',
-      };
-      
-      if (result.exitCode == 0) {
-        final lines = result.stdout.toString().trim().split('\n');
-        for (String line in lines) {
-          if (line.startsWith('ZEBRA:')) {
-            statuses['zebra'] = line.substring(6);
-          } else if (line.startsWith('BEMATECH:')) {
-            statuses['bematech'] = line.substring(9);
-          } else if (line.startsWith('BIOMETRIC:')) {
-            statuses['biometric'] = line.substring(10);
+      final lines = stdoutString.trim().split('\n');
+      for (String line in lines) {
+        if (line.startsWith('---[RESULT]---')) {
+          final parts = line.split(':');
+          if (parts.length > 1) {
+            final keyPart = parts[0];
+            final valuePart = parts.sublist(1).join(':').trim();
+
+            if (keyPart.contains('ZEBRA')) {
+              statuses['zebra'] = valuePart;
+            } else if (keyPart.contains('BEMATECH')) {
+              statuses['bematech'] = valuePart;
+            } else if (keyPart.contains('BIOMETRIC')) {
+              statuses['biometric'] = valuePart;
+            }
           }
         }
       }
-      
       return statuses;
     } catch (e) {
-      debugPrint("Erro ao verificar status de todos os dispositivos: $e");
-      return {
-        'zebra': 'N/A',
-        'bematech': 'N/A', 
-        'biometric': 'N/A',
-      };
+      debugPrint("Exceção fatal ao executar o script de dispositivos: $e");
+      return {'zebra': 'N/A', 'bematech': 'N/A', 'biometric': 'N/A'};
+    } finally {
+      if (await scriptFile.exists()) {
+        await scriptFile.delete();
+      }
     }
   }
 
@@ -297,7 +242,6 @@ Write-Output "BIOMETRIC:$biometricStatus"
       String hdType = await _getHdType();
       String hdStorageInfo = await _getHdStorageInfo();
 
-      // Usando o método otimizado para obter status de todos os dispositivos
       Map<String, String> deviceStatuses = await _getAllDeviceStatus();
       String biometricStatus = deviceStatuses['biometric'] ?? 'N/A';
       String zebraStatus = deviceStatuses['zebra'] ?? 'N/A';
