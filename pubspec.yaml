@@ -1,0 +1,35 @@
+# Ficheiro: pubspec.yaml
+# ----------------------
+# Define as dependências e metadados do projeto do Agente de Monitoramento.
+
+name: agent_windows
+description: "Agente de monitoramento para coletar e enviar dados de sistemas Windows."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.3 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Pacote para fazer as requisições HTTP para o nosso servidor backend.
+  http: ^1.2.1
+
+  # Pacote para salvar as configurações (IP e porta) localmente no dispositivo.
+  shared_preferences: ^2.2.3
+  
+  # Ícones para a UI.
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+
