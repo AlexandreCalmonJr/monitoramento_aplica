@@ -196,7 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<int>(
-              value: _selectedInterval,
+              initialValue: _selectedInterval,
               decoration: const InputDecoration(
                 labelText: 'Intervalo de Sincronização',
                 border: OutlineInputBorder(),
