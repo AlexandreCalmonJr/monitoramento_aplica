@@ -41,14 +41,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.19.1"
-  cupertino_icons:
-    dependency: "direct main"
+  crypto:
+    dependency: transitive
     description:
-      name: cupertino_icons
-      sha256: ba631d1c7f7bef6b729a622b7b752645a2d076dba9976925b8f25725a30e1ee6
+      name: crypto
+      sha256: "1e445881f28f22d6140f181e07737b22f1e099a5e1ff94b0af2f9e4a463f4855"
       url: "https://pub.dev"
     source: hosted
-    version: "1.0.8"
+    version: "3.0.6"
   fake_async:
     dependency: transitive
     description:
@@ -78,6 +78,38 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_background_service:
+    dependency: "direct main"
+    description:
+      name: flutter_background_service
+      sha256: "70a1c185b1fa1a44f8f14ecd6c86f6e50366e3562f00b2fa5a54df39b3324d3d"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.1.0"
+  flutter_background_service_android:
+    dependency: transitive
+    description:
+      name: flutter_background_service_android
+      sha256: ca0793d4cd19f1e194a130918401a3d0b1076c81236f7273458ae96987944a87
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.3.1"
+  flutter_background_service_ios:
+    dependency: transitive
+    description:
+      name: flutter_background_service_ios
+      sha256: "6037ffd45c4d019dab0975c7feb1d31012dd697e25edc05505a4a9b0c7dc9fba"
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.0.3"
+  flutter_background_service_platform_interface:
+    dependency: transitive
+    description:
+      name: flutter_background_service_platform_interface
+      sha256: ca74aa95789a8304f4d3f57f07ba404faa86bed6e415f83e8edea6ad8b904a41
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.1.2"
   flutter_lints:
     dependency: "direct dev"
     description:
@@ -216,6 +248,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.8"
+  screen_retriever:
+    dependency: transitive
+    description:
+      name: screen_retriever
+      sha256: "6ee02c8a1158e6dae7ca430da79436e3b1c9563c8cf02f524af997c201ac2b90"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.9"
   shared_preferences:
     dependency: "direct main"
     description:
@@ -309,6 +349,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.1"
+  system_tray:
+    dependency: "direct main"
+    description:
+      name: system_tray
+      sha256: "40444e5de8ed907822a98694fd031b8accc3cb3c0baa547634ce76189cf3d9cf"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.3"
   term_glyph:
     dependency: transitive
     description:
@@ -333,6 +381,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.0"
+  uuid:
+    dependency: transitive
+    description:
+      name: uuid
+      sha256: "648e103079f7c64a36dc7d39369cabb358d377078a051d6ae2ad3aa539519313"
+      url: "https://pub.dev"
+    source: hosted
+    version: "3.0.7"
   vector_math:
     dependency: transitive
     description:
@@ -357,6 +413,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.1.1"
+  window_manager:
+    dependency: "direct main"
+    description:
+      name: window_manager
+      sha256: "8699323b30da4cdbe2aa2e7c9de567a6abd8a97d9a5c850a3c86dcd0b34bbfbf"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.9"
   xdg_directories:
     dependency: transitive
     description:

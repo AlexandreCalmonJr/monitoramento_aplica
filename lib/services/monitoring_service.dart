@@ -1,6 +1,4 @@
-// Ficheiro: lib/services/monitoring_service.dart
-// DESCRIÇÃO: Detecção melhorada de impressoras Zebra e Bematech com múltiplos métodos
-
+// File: lib/services/monitoring_service.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -9,16 +7,10 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class MonitoringService {
-  Timer? _timer;
-  final ValueNotifier<String> statusNotifier = ValueNotifier('Inativo');
-  final ValueNotifier<String> lastUpdateNotifier = ValueNotifier('Nenhuma');
-  final ValueNotifier<String> errorNotifier = ValueNotifier('');
-
-  String _newTotemType = 'N/A';
-
+  
   String _decodeOutput(dynamic output) {
     if (output is List<int>) {
-      return latin1.decode(output);
+      return latin1.decode(output, allowInvalid: true);
     }
     return output.toString();
   }
@@ -32,49 +24,65 @@ class MonitoringService {
       if (result.exitCode == 0) {
         return stdoutString.trim();
       } else {
-        debugPrint("Erro ao executar comando: '$command ${args.join(' ')}'. Stderr: $stderrString");
-        return "Erro ao executar comando: $stderrString";
+        debugPrint("Erro no comando '$command ${args.join(' ')}': $stderrString");
+        return "";
       }
     } catch (e) {
-      debugPrint("Exceção no comando: '$command ${args.join(' ')}'. Erro: $e");
-      return "Exceção no comando: $e";
+      debugPrint("Exceção no comando '$command ${args.join(' ')}': $e");
+      return "";
     }
   }
   
-  Future<String> _getRamInfo() async {
-    try {
-      const command = 'powershell';
-      const script = r'Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty TotalPhysicalMemory | ForEach-Object { "$([math]::Round($_ / 1GB)) GB" }';
-      final result = await _runCommand(command, ['-command', script]);
-      return result.isNotEmpty ? result : "N/A";
-    } catch (e) {
-      debugPrint("Erro ao obter informações de RAM: $e");
-      return "N/A";
-    }
+  // --- Funções de Coleta de Dados ---
+
+  Future<String> _getHostname() => _runCommand('hostname', []);
+
+  Future<String> _getSerialNumber() async {
+    final result = await _runCommand('wmic', ['bios', 'get', 'serialnumber']);
+    return result.split('\n').last.trim();
   }
 
-  Future<String> _getHdType() async {
-    try {
-      const command = 'powershell';
-      const script = r'(Get-PhysicalDisk | Select-Object -First 1).MediaType';
-      final result = await _runCommand(command, ['-command', script]);
-      return result.isNotEmpty ? result : "N/A";
-    } catch (e) {
-      debugPrint("Erro ao obter o tipo de HD: $e");
-      return "N/A";
-    }
+  Future<String> _getModel() async {
+    final result = await _runCommand('wmic', ['computersystem', 'get', 'model']);
+    return result.split('\n').last.trim();
   }
 
-  Future<String> _getHdStorageInfo() async {
-    try {
-      const command = 'powershell';
-      const script = r'Get-Volume -DriveLetter C | ForEach-Object { "Total: " + [math]::Round($_.Size / 1GB) + " GB, Livre: " + [math]::Round($_.SizeRemaining / 1GB) + " GB" }';
-      final result = await _runCommand(command, ['-command', script]);
-      return result.isNotEmpty ? result : "N/A";
-    } catch (e) {
-      debugPrint("Erro ao obter informações de armazenamento do HD: $e");
-      return "N/A";
+  Future<String> _getManufacturer() async {
+    final result = await _runCommand('wmic', ['computersystem', 'get', 'manufacturer']);
+    return result.split('\n').last.trim();
+  }
+
+  Future<String> _getProcessor() async {
+    final result = await _runCommand('wmic', ['cpu', 'get', 'name']);
+    return result.split('\n').last.trim();
+  }
+
+  Future<String> _getRam() async {
+    final result = await _runCommand('powershell', [
+      '-command',
+      r'Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty TotalPhysicalMemory | ForEach-Object { "$([math]::Round($_ / 1GB)) GB" }'
+    ]);
+    return result.isNotEmpty ? result : "N/A";
+  }
+
+  Future<String> _getStorage() async {
+    final result = await _runCommand('powershell', [
+      '-command',
+      r'Get-Volume -DriveLetter C | ForEach-Object { "Total: " + [math]::Round($_.Size / 1GB) + " GB" }'
+    ]);
+    return result.isNotEmpty ? result : "N/A";
+  }
+
+  Future<Map<String, String>> _getNetworkInfo() async {
+    final result = await _runCommand('powershell', [
+      '-command',
+      r'Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias (Get-NetConnectionProfile).InterfaceAlias | Select-Object -First 1 | ForEach-Object { $_.IPAddress + ";" + (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex).MacAddress }'
+    ]);
+    if (result.contains(';')) {
+      final parts = result.split(';');
+      return {'ipAddress': parts[0], 'macAddress': parts[1]};
     }
+    return {'ipAddress': 'N/A', 'macAddress': 'N/A'};
   }
 
   Future<List<String>> _getInstalledPrograms() async {
@@ -100,8 +108,8 @@ class MonitoringService {
       debugPrint("Método principal gerou exceção: $e");
     }
     
-    debugPrint("Não foi possível listar programas, retornando mensagem de erro");
-    return ["Não foi possível listar programas instalados"];
+    debugPrint("Não foi possível listar programas, retornando lista vazia");
+    return [];
   }
 
   Future<Map<String, String>> _getAllDeviceStatus() async {
@@ -328,125 +336,72 @@ Write-Output "RESULT_BIOMETRIC:$biometricStatus"
     }
   }
 
-  Future<void> collectAndSendData(String serverUrl) async {
-    if (serverUrl.isEmpty) {
-      errorNotifier.value = 'URL do servidor não configurada.';
+  // --- Método Principal de Coleta e Envio ---
+
+  Future<void> collectAndSendData({
+    required String moduleId,
+    required String serverUrl,
+    String? manualSector,
+    String? manualFloor,
+  }) async {
+    if (serverUrl.isEmpty || moduleId.isEmpty) {
+      debugPrint('Servidor ou Módulo não configurado. Abortando envio.');
       return;
     }
 
-    statusNotifier.value = 'A recolher dados...';
-    errorNotifier.value = '';
-    debugPrint('=== INICIANDO COLETA DE DADOS ===');
-    debugPrint('Servidor: $serverUrl');
+    debugPrint('Coletando dados para o módulo $moduleId...');
 
     try {
-      String hostname = await _runCommand('hostname', []);
-      String serialNumberRaw = await _runCommand('wmic', ['bios', 'get', 'serialnumber']);
-      String modelRaw = await _runCommand('wmic', ['computersystem', 'get', 'model']);
-      List<String> installedPrograms = await _getInstalledPrograms();
-      String printersRaw = await _runCommand('wmic', ['printer', 'get', 'name,status']);
-      
-      String ramInfo = await _getRamInfo();
-      String hdType = await _getHdType();
-      String hdStorageInfo = await _getHdStorageInfo();
-
-      Map<String, String> deviceStatuses = await _getAllDeviceStatus();
-      String biometricStatus = deviceStatuses['biometric'] ?? 'Não detectado';
-      String zebraStatus = deviceStatuses['zebra'] ?? 'Não detectado';
-      String bematechStatus = deviceStatuses['bematech'] ?? 'Não detectado';
-      
-      String totemType = _newTotemType;
-
-      final serialNumber = serialNumberRaw.split('\n').last.trim();
-      final model = modelRaw.split('\n').last.trim();
-
+      // Coleta os dados base
+      final serialNumber = await _getSerialNumber();
       if (serialNumber.isEmpty || serialNumber.toLowerCase().contains('error')) {
-        throw Exception('Não foi possível obter o número de série.');
+        throw Exception('Não foi possível obter o número de série. Verifique as permissões.');
       }
 
-      Map<String, dynamic> systemData = {
-        'hostname': hostname,
-        'serialNumber': serialNumber,
-        'model': model,
-        'serviceTag': serialNumber,
-        'ram': ramInfo,
-        'hdType': hdType,
-        'hdStorage': hdStorageInfo,
-        'installedPrograms': installedPrograms,
-        'printerStatus': printersRaw,
-        'biometricReaderStatus': biometricStatus,
-        'zebraStatus': zebraStatus,
-        'bematechStatus': bematechStatus,
-        'totemType': totemType,
+      final networkInfo = await _getNetworkInfo();
+
+      // Monta o payload base
+      Map<String, dynamic> payload = {
+        'asset_name': await _getHostname(),
+        'serial_number': serialNumber,
+        'ip_address': networkInfo['ipAddress'],
+        'mac_address': networkInfo['macAddress'],
+        'location': '', // Deixamos o backend mapear, mas enviamos setor/andar
+        'assigned_to': await _runCommand('whoami', []),
+        'custom_data': {
+          'sector': manualSector,
+          'floor': manualFloor,
+        }
       };
+      
+      // Adiciona dados específicos do Desktop/Notebook
+      payload.addAll({
+        'hostname': payload['asset_name'],
+        'model': await _getModel(),
+        'manufacturer': await _getManufacturer(),
+        'processor': await _getProcessor(),
+        'ram': await _getRam(),
+        'storage': await _getStorage(),
+        'operating_system': Platform.operatingSystem,
+        'os_version': Platform.operatingSystemVersion,
+      });
 
-      debugPrint('=== DADOS A ENVIAR ===');
-      debugPrint('Hostname: $hostname');
-      debugPrint('Serial: $serialNumber');
-      debugPrint('Modelo: $model');
-      debugPrint('Zebra: $zebraStatus');
-      debugPrint('Bematech: $bematechStatus');
-      debugPrint('Biométrico: $biometricStatus');
-      debugPrint('Tipo Totem: $totemType');
+      debugPrint('Enviando dados para $serverUrl/api/modules/$moduleId/assets');
 
-      statusNotifier.value = 'A enviar dados...';
       final response = await http.post(
-        Uri.parse(serverUrl),
+        Uri.parse('$serverUrl/api/modules/$moduleId/assets'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode(systemData),
-      ).timeout(Duration(seconds: 30));
+        body: json.encode(payload),
+      ).timeout(const Duration(seconds: 30));
 
-      if (response.statusCode == 200) {
-        statusNotifier.value = 'Ativo';
-        lastUpdateNotifier.value = 'Último envio: ${DateTime.now().toLocal().toString().substring(0, 19)}';
-        errorNotifier.value = '';
-        debugPrint('=== DADOS ENVIADOS COM SUCESSO ===');
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        debugPrint('Dados enviados com sucesso! Resposta: ${response.body}');
       } else {
-        debugPrint('=== ERRO HTTP ===');
-        debugPrint('Status: ${response.statusCode}');
-        debugPrint('Resposta: ${response.body}');
-        throw Exception('Falha ao enviar dados. Status: ${response.statusCode}');
+        debugPrint('Falha ao enviar dados. Status: ${response.statusCode}, Corpo: ${response.body}');
+        throw Exception('Erro do servidor: ${response.statusCode}');
       }
     } catch (e) {
-      statusNotifier.value = 'Erro';
-      errorNotifier.value = e.toString().replaceAll('Exception: ', '');
-      debugPrint('=== EXCEÇÃO CAPTURADA ===');
-      debugPrint('Erro: $e');
+      debugPrint('ERRO no ciclo de monitoramento: $e');
     }
-  }
-
-  void start(String serverAddress, int intervalInSeconds, String newTotemType) {
-    stop();
-    if (serverAddress.isEmpty) {
-      statusNotifier.value = 'Inativo (Configure o servidor)';
-      return;
-    }
-    
-    _newTotemType = newTotemType;
-    
-    final url = 'http://$serverAddress/api/monitor';
-    debugPrint('=== SERVIÇO INICIADO ===');
-    debugPrint('URL: $url');
-    debugPrint('Intervalo: ${intervalInSeconds}s');
-    debugPrint('Tipo Totem: $newTotemType');
-    
-    collectAndSendData(url);
-    _timer = Timer.periodic(Duration(seconds: intervalInSeconds), (timer) {
-      collectAndSendData(url);
-    });
-    statusNotifier.value = 'Ativo';
-  }
-
-  void stop() {
-    _timer?.cancel();
-    statusNotifier.value = 'Inativo';
-    debugPrint('=== SERVIÇO PARADO ===');
-  }
-
-  void dispose() {
-    stop();
-    statusNotifier.dispose();
-    lastUpdateNotifier.dispose();
-    errorNotifier.dispose();
   }
 }
