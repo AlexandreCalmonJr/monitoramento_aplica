@@ -1,9 +1,9 @@
 // File: lib/screens/home_screen.dart
 import 'dart:convert';
 
+import 'package:agent_windows/background_service.dart';
 import 'package:agent_windows/services/settings_service.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:http/http.dart' as http;
 
 class ModuleInfo {
@@ -32,6 +32,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _formKey = GlobalKey<FormState>();
   final _settingsService = SettingsService();
+  final _backgroundService = BackgroundService();
   
   final _ipController = TextEditingController();
   final _portController = TextEditingController();
@@ -160,7 +161,8 @@ class _HomeScreenState extends State<HomeScreen> {
         newFloor: _floorController.text,
       );
 
-      FlutterBackgroundService().invoke('updateSettings', {
+      // Atualiza o serviço de background
+      await _backgroundService.updateSettings({
         'moduleId': _selectedModuleId,
         'serverUrl': 'http://${_ipController.text}:${_portController.text}',
         'interval': _selectedInterval,
@@ -199,6 +201,30 @@ class _HomeScreenState extends State<HomeScreen> {
                     Text(
                       'Agente de Monitoramento',
                       style: theme.textTheme.titleLarge,
+                    ),
+                    const Spacer(),
+                    // Indicador de status
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: _backgroundService.isRunning ? Colors.green : Colors.grey,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _backgroundService.isRunning ? Icons.check_circle : Icons.pause_circle,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _backgroundService.isRunning ? 'Ativo' : 'Parado',
+                            style: const TextStyle(color: Colors.white, fontSize: 12),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -245,7 +271,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             Expanded(
                               child: DropdownButtonFormField<String>(
-                                value: _selectedModuleId,
+                                initialValue: _selectedModuleId,
                                 decoration: InputDecoration(
                                   labelText: 'Selecione o Módulo',
                                   prefixIcon: _isLoadingModules 
@@ -312,7 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 16),
 
                         DropdownButtonFormField<int>(
-                          value: _selectedInterval,
+                          initialValue: _selectedInterval,
                           decoration: const InputDecoration(
                             labelText: 'Intervalo de Sincronização',
                             prefixIcon: Icon(Icons.timer_outlined),

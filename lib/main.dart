@@ -5,9 +5,9 @@ import 'dart:io';
 import 'package:agent_windows/background_service.dart';
 import 'package:agent_windows/screens/home_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -15,8 +15,8 @@ Future<void> main() async {
   // Configuração para o gerenciador de janela
   await windowManager.ensureInitialized();
   
-  // Inicia o serviço de background
-  await initializeBackgroundService();
+  // Inicia o serviço de background (Windows Timer)
+  await BackgroundService().initialize();
 
   // Configuração da bandeja do sistema (System Tray)
   if (Platform.isWindows) {
@@ -40,41 +40,77 @@ Future<void> main() async {
 }
 
 Future<void> initSystemTray() async {
-  final String path = Platform.isWindows 
-      ? 'assets/app_icon.ico' 
-      : 'assets/app_icon.png';
-
   final SystemTray systemTray = SystemTray();
 
-  await systemTray.initSystemTray(
-    title: "Agente de Monitoramento",
-    iconPath: path,
-  );
-
-  final Menu menu = Menu();
-  await menu.buildFrom([
-    MenuItemLabel(
-      label: 'Abrir Agente', 
-      onClicked: (menuItem) => windowManager.show()
-    ),
-    MenuItemLabel(
-      label: 'Fechar', 
-      onClicked: (menuItem) {
-        FlutterBackgroundService().invoke('stopService');
-        exit(0);
+  try {
+    // Tenta usar o ícone do app, se não existir usa vazio
+    String iconPath = '';
+    if (Platform.isWindows) {
+      final iconFile = File('data/flutter_assets/assets/app_icon.ico');
+      if (await iconFile.exists()) {
+        iconPath = iconFile.path;
       }
-    ),
-  ]);
-
-  await systemTray.setContextMenu(menu);
-
-  systemTray.registerSystemTrayEventHandler((eventName) {
-    if (eventName == kSystemTrayEventClick) {
-      windowManager.show();
-    } else if (eventName == kSystemTrayEventRightClick) {
-      systemTray.popUpContextMenu();
     }
-  });
+
+    // Só inicializa se tiver um ícone válido
+    if (iconPath.isEmpty) {
+      debugPrint('Aviso: Ícone não encontrado, bandeja do sistema desabilitada');
+      debugPrint('Crie um arquivo assets/app_icon.ico para habilitar a bandeja');
+      return;
+    }
+
+    await systemTray.initSystemTray(
+      title: "Agente de Monitoramento",
+      iconPath: iconPath,
+    );
+
+    final Menu menu = Menu();
+    await menu.buildFrom([
+      MenuItemLabel(
+        label: 'Abrir Agente', 
+        onClicked: (menuItem) => windowManager.show()
+      ),
+      MenuItemLabel(
+        label: 'Fechar', 
+        onClicked: (menuItem) {
+          BackgroundService().stop();
+          exit(0);
+        }
+      ),
+      MenuItemLabel(
+        label: 'Reiniciar Serviço',
+        onClicked: (menuItem) {
+          BackgroundService().initialize();
+        }
+      ),
+      MenuItemLabel(
+        label: 'Fechar', 
+        onClicked: (menuItem) {
+          BackgroundService().stop();
+          exit(0);
+        }
+      ),
+      MenuItemLabel(
+        label: 'Reiniciar Serviço',
+        onClicked: (menuItem) {
+          BackgroundService().initialize();
+        }
+      ),
+    ]);
+
+    await systemTray.setContextMenu(menu);
+
+    systemTray.registerSystemTrayEventHandler((eventName) {
+      if (eventName == kSystemTrayEventClick) {
+        windowManager.show();
+      } else if (eventName == kSystemTrayEventRightClick) {
+        systemTray.popUpContextMenu();
+      }
+    });
+  } catch (e) {
+    debugPrint('Erro ao inicializar bandeja do sistema: $e');
+    // Continua sem a bandeja do sistema se houver erro
+  }
 }
 
 class AgentApp extends StatelessWidget {
