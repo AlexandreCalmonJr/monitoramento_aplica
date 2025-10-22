@@ -8,6 +8,7 @@ class SettingsService {
   late String moduleId;
   late String sector;
   late String floor;
+  late String token; // <-- ADICIONADO
 
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
@@ -17,6 +18,7 @@ class SettingsService {
     moduleId = prefs.getString('module_id') ?? '';
     sector = prefs.getString('manual_sector') ?? '';
     floor = prefs.getString('manual_floor') ?? '';
+    token = prefs.getString('auth_token') ?? ''; // <-- ADICIONADO
   }
 
   Future<void> saveSettings({
@@ -26,6 +28,7 @@ class SettingsService {
     required String newModuleId,
     required String newSector,
     required String newFloor,
+    required String newToken, // <-- ADICIONADO
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('server_ip', newIp);
@@ -34,6 +37,7 @@ class SettingsService {
     await prefs.setString('module_id', newModuleId);
     await prefs.setString('manual_sector', newSector);
     await prefs.setString('manual_floor', newFloor);
+    await prefs.setString('auth_token', newToken); // <-- ADICIONADO
     
     // Atualiza as variáveis locais
     ip = newIp;
@@ -42,5 +46,7 @@ class SettingsService {
     moduleId = newModuleId;
     sector = newSector;
     floor = newFloor;
+    token = newToken; // <-- ADICIONADO
   }
 }
+

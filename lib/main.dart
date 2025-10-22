@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:agent_windows/background_service.dart';
 import 'package:agent_windows/screens/home_screen.dart';
+import 'package:flutter/foundation.dart'; // <-- ADICIONADO
 import 'package:flutter/material.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
@@ -19,8 +20,9 @@ Future<void> main() async {
   await BackgroundService().initialize();
 
   // Configuração da bandeja do sistema (System Tray)
+  bool trayInitialized = false; // <-- ADICIONADO
   if (Platform.isWindows) {
-    await initSystemTray();
+    trayInitialized = await initSystemTray(); // <-- MODIFICADO
   }
 
   runApp(const AgentApp());
@@ -34,34 +36,44 @@ Future<void> main() async {
       titleBarStyle: TitleBarStyle.normal,
     );
     windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.hide(); // Começa escondido
+      // SÓ ESCONDE SE A BANDEJA DO SISTEMA FUNCIONAR
+      if (trayInitialized) { // <-- MODIFICADO
+        await windowManager.hide(); // Começa escondido
+      } else {
+        await windowManager.show(); // Mostra se a bandeja falhar
+      }
     });
   }
 }
 
-Future<void> initSystemTray() async {
+// MODIFICADO: Retorna 'bool' para indicar sucesso ou falha
+Future<bool> initSystemTray() async {
   final SystemTray systemTray = SystemTray();
+  String iconPath = '';
 
   try {
-    // Tenta usar o ícone do app, se não existir usa vazio
-    String iconPath = '';
-    if (Platform.isWindows) {
-      final iconFile = File('data/flutter_assets/assets/app_icon.ico');
-      if (await iconFile.exists()) {
-        iconPath = iconFile.path;
-      }
+    // Lógica de path mais robusta para Debug e Release
+    if (kDebugMode) {
+      // Em modo Debug, o path é relativo à raiz do projeto
+      iconPath = 'assets/app_icon.ico';
+      debugPrint('Modo Debug: Usando path do ícone: $iconPath');
+    } else {
+      // Em modo Release, o path é relativo ao executável
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      iconPath = '$exeDir/data/flutter_assets/assets/app_icon.ico';
+      debugPrint('Modo Release: Usando path do ícone: $iconPath');
     }
-
-    // Só inicializa se tiver um ícone válido
-    if (iconPath.isEmpty) {
-      debugPrint('Aviso: Ícone não encontrado, bandeja do sistema desabilitada');
+    
+    final iconFile = File(iconPath);
+    if (!await iconFile.exists()) {
+      debugPrint('Aviso: Ícone não encontrado em $iconPath');
       debugPrint('Crie um arquivo assets/app_icon.ico para habilitar a bandeja');
-      return;
+      return false; // <-- MODIFICADO: Retorna falha
     }
 
     await systemTray.initSystemTray(
       title: "Agente de Monitoramento",
-      iconPath: iconPath,
+      iconPath: iconPath, // Usa o path correto
     );
 
     final Menu menu = Menu();
@@ -107,9 +119,14 @@ Future<void> initSystemTray() async {
         systemTray.popUpContextMenu();
       }
     });
+
+    debugPrint("Bandeja do sistema inicializada com sucesso.");
+    return true; // <-- MODIFICADO: Retorna sucesso
+
   } catch (e) {
     debugPrint('Erro ao inicializar bandeja do sistema: $e');
     // Continua sem a bandeja do sistema se houver erro
+    return false; // <-- MODIFICADO: Retorna falha
   }
 }
 

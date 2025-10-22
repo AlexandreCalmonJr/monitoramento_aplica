@@ -22,13 +22,14 @@ class BackgroundService {
   Future<void> initialize() async {
     await _settingsService.loadSettings();
     
-    // Só inicia se houver configurações válidas
+    // MODIFICADO: Adiciona verificação de token
     if (_settingsService.moduleId.isNotEmpty && 
         _settingsService.ip.isNotEmpty && 
-        _settingsService.port.isNotEmpty) {
+        _settingsService.port.isNotEmpty &&
+        _settingsService.token.isNotEmpty) {
       await start();
     } else {
-      debugPrint('Background Service: Aguardando configuração inicial');
+      debugPrint('Background Service: Aguardando configuração inicial (requer IP, Porta e Token)');
     }
   }
 
@@ -40,11 +41,12 @@ class BackgroundService {
 
     await _settingsService.loadSettings();
     
-    // Valida configurações
+    // MODIFICADO: Adiciona verificação de token
     if (_settingsService.moduleId.isEmpty || 
         _settingsService.ip.isEmpty || 
-        _settingsService.port.isEmpty) {
-      debugPrint('Background Service: Configurações incompletas, não pode iniciar');
+        _settingsService.port.isEmpty ||
+        _settingsService.token.isEmpty) {
+      debugPrint('Background Service: Configurações incompletas (requer IP, Porta e Token), não pode iniciar');
       return;
     }
 
@@ -54,6 +56,7 @@ class BackgroundService {
       'interval': _settingsService.interval,
       'sector': _settingsService.sector,
       'floor': _settingsService.floor,
+      'token': _settingsService.token, // <-- ADICIONADO
     };
 
     _isRunning = true;
@@ -85,18 +88,22 @@ class BackgroundService {
     final serverUrl = _currentSettings!['serverUrl'] as String?;
     final sector = _currentSettings!['sector'] as String?;
     final floor = _currentSettings!['floor'] as String?;
+    final token = _currentSettings!['token'] as String?; // <-- ADICIONADO
 
+    // MODIFICADO: Adiciona verificação de token
     if (moduleId != null && moduleId.isNotEmpty && 
-        serverUrl != null && serverUrl.isNotEmpty) {
+        serverUrl != null && serverUrl.isNotEmpty &&
+        token != null && token.isNotEmpty) {
       debugPrint('Background Service: Coletando dados para o módulo $moduleId');
       await _monitoringService.collectAndSendData(
         moduleId: moduleId,
         serverUrl: serverUrl,
         manualSector: sector,
         manualFloor: floor,
+        token: token, // <-- PASSAR O TOKEN
       );
     } else {
-      debugPrint('Background Service: Configurações incompletas');
+      debugPrint('Background Service: Configurações incompletas (requer IP, Porta e Token)');
     }
   }
 
@@ -122,3 +129,4 @@ class BackgroundService {
     stop();
   }
 }
+

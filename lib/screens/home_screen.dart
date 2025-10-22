@@ -14,6 +14,7 @@ class ModuleInfo {
   ModuleInfo({required this.id, required this.name, required this.type});
 
   factory ModuleInfo.fromJson(Map<String, dynamic> json) {
+    // MODIFICADO: Ajustado para corresponder à estrutura de 'moduleRoutes.js'
     return ModuleInfo(
       id: json['_id'],
       name: json['name'],
@@ -38,6 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _portController = TextEditingController();
   final _sectorController = TextEditingController();
   final _floorController = TextEditingController();
+  final _tokenController = TextEditingController(); // <-- ADICIONADO
   
   List<ModuleInfo> _availableModules = [];
   String? _selectedModuleId;
@@ -65,6 +67,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _portController.dispose();
     _sectorController.dispose();
     _floorController.dispose();
+    _tokenController.dispose(); // <-- ADICIONADO
     super.dispose();
   }
 
@@ -74,21 +77,28 @@ class _HomeScreenState extends State<HomeScreen> {
     _portController.text = _settingsService.port;
     _sectorController.text = _settingsService.sector;
     _floorController.text = _settingsService.floor;
+    _tokenController.text = _settingsService.token; // <-- ADICIONADO
     _selectedInterval = _settingsService.interval;
     _selectedModuleId = _settingsService.moduleId;
 
-    if (_ipController.text.isNotEmpty && _portController.text.isNotEmpty) {
+    // MODIFICADO: Só busca módulos se tiver IP, Porta e Token
+    if (_ipController.text.isNotEmpty && 
+        _portController.text.isNotEmpty &&
+        _tokenController.text.isNotEmpty) {
       _fetchModules();
     }
     setState(() {});
   }
 
   Future<void> _fetchModules() async {
-    if (_ipController.text.isEmpty || _portController.text.isEmpty) {
+    // MODIFICADO: Adiciona verificação de token
+    if (_ipController.text.isEmpty || 
+        _portController.text.isEmpty ||
+        _tokenController.text.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Por favor, preencha o IP e a Porta do servidor.'),
+            content: Text('Por favor, preencha IP, Porta e Token do servidor.'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -103,13 +113,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final serverUrl = 'http://${_ipController.text}:${_portController.text}';
+      final token = _tokenController.text; // <-- OBTER TOKEN
+
+      // MODIFICADO: Endpoint corrigido e cabeçalho AUTH_TOKEN
       final response = await http.get(
-        Uri.parse('$serverUrl/api/modules/agent-list')
+        Uri.parse('$serverUrl/api/modules'), // <-- CORRIGIDO (removido /agent-list)
+        headers: {
+          'AUTH_TOKEN': token, 
+        },
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final List<dynamic> modulesJson = data['modules'];
+        
+        // MODIFICADO: Ajustado para a resposta do servidor { success: true, modules: [...] }
+        final List<dynamic> modulesJson = data['modules']; 
+        
         if (mounted) {
           setState(() {
             _availableModules = modulesJson
@@ -121,6 +140,8 @@ class _HomeScreenState extends State<HomeScreen> {
             }
           });
         }
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+          throw Exception('Falha ao buscar módulos: Token inválido ou expirado.');
       } else {
         throw Exception('Falha ao buscar módulos: ${response.statusCode}');
       }
@@ -152,6 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
+      // MODIFICADO: Passa o novo token ao salvar
       await _settingsService.saveSettings(
         newIp: _ipController.text,
         newPort: _portController.text,
@@ -159,15 +181,17 @@ class _HomeScreenState extends State<HomeScreen> {
         newModuleId: _selectedModuleId!,
         newSector: _sectorController.text,
         newFloor: _floorController.text,
+        newToken: _tokenController.text, // <-- ADICIONADO
       );
 
-      // Atualiza o serviço de background
+      // MODIFICADO: Passa o token para o serviço de background
       await _backgroundService.updateSettings({
         'moduleId': _selectedModuleId,
         'serverUrl': 'http://${_ipController.text}:${_portController.text}',
         'interval': _selectedInterval,
         'sector': _sectorController.text,
         'floor': _floorController.text,
+        'token': _tokenController.text, // <-- ADICIONADO
       });
 
       if (mounted) {
@@ -264,6 +288,20 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(height: 16),
                         
+                        // <-- CAMPO DE TOKEN ADICIONADO -->
+                        TextFormField(
+                          controller: _tokenController,
+                          obscureText: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Token de Autenticação',
+                            prefixIcon: Icon(Icons.key_outlined),
+                          ),
+                          validator: (v) => (v == null || v.isEmpty) ? 'Obrigatório' : null,
+                        ),
+                        // <-- FIM DO CAMPO DE TOKEN -->
+
+                        const SizedBox(height: 16),
+                        
                         Text('Módulo de Conexão', style: theme.textTheme.titleMedium),
                         const SizedBox(height: 16),
                         
@@ -271,7 +309,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             Expanded(
                               child: DropdownButtonFormField<String>(
-                                initialValue: _selectedModuleId,
+                                value: _selectedModuleId, // Alterado de initialValue para value
                                 decoration: InputDecoration(
                                   labelText: 'Selecione o Módulo',
                                   prefixIcon: _isLoadingModules 
@@ -338,7 +376,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 16),
 
                         DropdownButtonFormField<int>(
-                          initialValue: _selectedInterval,
+                          value: _selectedInterval, // Alterado de initialValue para value
                           decoration: const InputDecoration(
                             labelText: 'Intervalo de Sincronização',
                             prefixIcon: Icon(Icons.timer_outlined),
@@ -378,3 +416,4 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+

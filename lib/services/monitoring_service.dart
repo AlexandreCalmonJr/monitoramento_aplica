@@ -34,6 +34,7 @@ class MonitoringService {
   }
   
   // --- Funções de Coleta de Dados ---
+  // (Nenhuma alteração de _getHostname até _getAllDeviceStatus)
 
   Future<String> _getHostname() => _runCommand('hostname', []);
 
@@ -341,11 +342,13 @@ Write-Output "RESULT_BIOMETRIC:$biometricStatus"
   Future<void> collectAndSendData({
     required String moduleId,
     required String serverUrl,
+    required String? token, // <-- ADICIONADO
     String? manualSector,
     String? manualFloor,
   }) async {
-    if (serverUrl.isEmpty || moduleId.isEmpty) {
-      debugPrint('Servidor ou Módulo não configurado. Abortando envio.');
+    // MODIFICADO: Adiciona verificação de token
+    if (serverUrl.isEmpty || moduleId.isEmpty || token == null || token.isEmpty) {
+      debugPrint('Servidor, Módulo ou Token não configurado. Abortando envio.');
       return;
     }
 
@@ -375,6 +378,7 @@ Write-Output "RESULT_BIOMETRIC:$biometricStatus"
       };
       
       // Adiciona dados específicos do Desktop/Notebook
+      // MODIFICADO: Corresponde ao endpoint POST /api/modules/:moduleId/assets
       payload.addAll({
         'hostname': payload['asset_name'],
         'model': await _getModel(),
@@ -388,14 +392,21 @@ Write-Output "RESULT_BIOMETRIC:$biometricStatus"
 
       debugPrint('Enviando dados para $serverUrl/api/modules/$moduleId/assets');
 
+      // MODIFICADO: Adiciona cabeçalho (Header) de autenticação
       final response = await http.post(
         Uri.parse('$serverUrl/api/modules/$moduleId/assets'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'AUTH_TOKEN': token, // <-- ALTERADO PARA AUTH_TOKEN
+        },
         body: json.encode(payload),
       ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         debugPrint('Dados enviados com sucesso! Resposta: ${response.body}');
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        debugPrint('Falha ao enviar dados. Token inválido ou expirado.');
+        throw Exception('Erro do servidor: Token inválido (${response.statusCode})');
       } else {
         debugPrint('Falha ao enviar dados. Status: ${response.statusCode}, Corpo: ${response.body}');
         throw Exception('Erro do servidor: ${response.statusCode}');
@@ -405,3 +416,4 @@ Write-Output "RESULT_BIOMETRIC:$biometricStatus"
     }
   }
 }
+
