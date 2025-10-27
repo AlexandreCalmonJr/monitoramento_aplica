@@ -3,9 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
-  static final AuthService _instance = AuthService._internal();
-  factory AuthService() => _instance;
-  AuthService._internal();
+  // Construtor público
+  AuthService() {
+    debugPrint('AuthService inicializado');
+  }
 
   String? _jwtToken;
   String? _legacyToken;

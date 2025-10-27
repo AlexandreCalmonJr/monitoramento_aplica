@@ -1,23 +1,28 @@
-// File: lib/services/background_service.dart
+// File: lib/background_service.dart
 import 'dart:async';
 
 import 'package:agent_windows/services/monitoring_service.dart';
 import 'package:agent_windows/services/settings_service.dart';
-import 'package:flutter/foundation.dart';
+import 'package:logger/logger.dart';
 
 class BackgroundService {
-  static final BackgroundService _instance = BackgroundService._internal();
-  factory BackgroundService() => _instance;
-  BackgroundService._internal();
-
   Timer? _timer;
-  final MonitoringService _monitoringService = MonitoringService();
-  final SettingsService _settingsService = SettingsService();
+  final Logger _logger;
+  final MonitoringService _monitoringService;
+  final SettingsService _settingsService;
   
   bool _isRunning = false;
   Map<String, dynamic>? _currentSettings;
 
   bool get isRunning => _isRunning;
+  String lastRunStatus = "Aguardando";
+  DateTime? lastRunTime;
+  DateTime? nextRunTime;
+
+  // Construtor com DI
+  BackgroundService(this._logger, this._settingsService, this._monitoringService) {
+    _logger.i('BackgroundService inicializado');
+  }
 
   Future<void> initialize() async {
     await _settingsService.loadSettings();
@@ -28,14 +33,15 @@ class BackgroundService {
         _settingsService.token.isNotEmpty) {
       await start();
     } else {
-      debugPrint('⚠️  Background Service: Aguardando configuração inicial');
-      debugPrint('   Requer: IP, Porta, Token e Módulo');
+      _logger.w('⚠️  Background Service: Aguardando configuração inicial');
+      _logger.d('   Requer: IP, Porta, Token e Módulo');
+      lastRunStatus = "Aguardando Configuração";
     }
   }
 
   Future<void> start() async {
     if (_isRunning) {
-      debugPrint('⚠️  Background Service: Já está rodando');
+      _logger.w('⚠️  Background Service: Já está rodando');
       return;
     }
 
@@ -45,7 +51,8 @@ class BackgroundService {
         _settingsService.ip.isEmpty || 
         _settingsService.port.isEmpty ||
         _settingsService.token.isEmpty) {
-      debugPrint('❌ Background Service: Configurações incompletas');
+      _logger.e('❌ Background Service: Configurações incompletas');
+      lastRunStatus = "Configuração Incompleta";
       return;
     }
 
@@ -59,13 +66,13 @@ class BackgroundService {
     };
 
     _isRunning = true;
-    debugPrint('✅ Background Service: Iniciado');
-    debugPrint('   Módulo: ${_settingsService.moduleId}');
-    debugPrint('   Servidor: ${_currentSettings!['serverUrl']}');
-    debugPrint('   Intervalo: ${_settingsService.interval}s');
+    _logger.i('✅ Background Service: Iniciado');
+    _logger.i('   Módulo: ${_settingsService.moduleId}');
+    _logger.i('   Servidor: ${_currentSettings!['serverUrl']}');
+    _logger.i('   Intervalo: ${_settingsService.interval}s');
     
     // Executa imediatamente
-    await _runCycle();
+    await runCycle();
     
     // Agenda execuções periódicas
     _scheduleNextRun();
@@ -75,17 +82,20 @@ class BackgroundService {
     _timer?.cancel();
     
     final interval = _currentSettings?['interval'] as int? ?? 300;
-    debugPrint('⏰ Próxima execução em ${interval}s (${Duration(seconds: interval).inMinutes} minutos)');
+    nextRunTime = DateTime.now().add(Duration(seconds: interval));
+    _logger.i('⏰ Próxima execução em ${interval}s (${Duration(seconds: interval).inMinutes} minutos)');
     
     _timer = Timer(Duration(seconds: interval), () async {
-      await _runCycle();
+      await runCycle();
       _scheduleNextRun();
     });
   }
 
-  Future<void> _runCycle() async {
+  // Renomeado para public (para o botão "Forçar Sincronização")
+  Future<void> runCycle() async {
     if (_currentSettings == null) {
-      debugPrint('⚠️  Background Service: Configurações ausentes');
+      _logger.w('⚠️  Background Service: Configurações ausentes');
+      lastRunStatus = "Erro: Config ausente";
       return;
     }
 
@@ -98,14 +108,13 @@ class BackgroundService {
     if (moduleId == null || moduleId.isEmpty || 
         serverUrl == null || serverUrl.isEmpty ||
         token == null || token.isEmpty) {
-      debugPrint('❌ Background Service: Configurações incompletas para executar ciclo');
+      _logger.e('❌ Background Service: Configurações incompletas para executar ciclo');
+      lastRunStatus = "Erro: Config incompleta";
       return;
     }
 
-    debugPrint('\n' + '=' * 60);
-    debugPrint('🔄 EXECUTANDO CICLO DE MONITORAMENTO');
-    debugPrint('   Timestamp: ${DateTime.now()}');
-    debugPrint('=' * 60);
+    _logger.i('🔄 EXECUTANDO CICLO DE MONITORAMENTO');
+    lastRunStatus = "Sincronizando...";
 
     try {
       await _monitoringService.collectAndSendData(
@@ -116,20 +125,18 @@ class BackgroundService {
         token: token,
       );
       
-      debugPrint('=' * 60);
-      debugPrint('✅ CICLO CONCLUÍDO COM SUCESSO');
-      debugPrint('=' * 60 + '\n');
+      _logger.i('✅ CICLO CONCLUÍDO COM SUCESSO');
+      lastRunStatus = "Sucesso";
     } catch (e, stackTrace) {
-      debugPrint('=' * 60);
-      debugPrint('❌ ERRO NO CICLO DE MONITORAMENTO');
-      debugPrint('   Erro: $e');
-      debugPrint('   Stack: $stackTrace');
-      debugPrint('=' * 60 + '\n');
+      _logger.e('❌ ERRO NO CICLO DE MONITORAMENTO', error: e, stackTrace: stackTrace);
+      lastRunStatus = "Erro: ${e.toString().substring(0, (e.toString().length < 50) ? e.toString().length : 50)}...";
     }
+    
+    lastRunTime = DateTime.now();
   }
 
   Future<void> updateSettings(Map<String, dynamic> settings) async {
-    debugPrint('🔄 Background Service: Atualizando configurações');
+    _logger.i('🔄 Background Service: Atualizando configurações');
     
     _currentSettings = settings;
     
@@ -138,15 +145,17 @@ class BackgroundService {
     _scheduleNextRun();
     
     // Executa imediatamente com as novas configurações
-    debugPrint('⚡ Executando ciclo imediato com novas configurações...');
-    await _runCycle();
+    _logger.i('⚡ Executando ciclo imediato com novas configurações...');
+    await runCycle();
   }
 
   void stop() {
     _timer?.cancel();
     _timer = null;
     _isRunning = false;
-    debugPrint('🛑 Background Service: Parado');
+    lastRunStatus = "Parado";
+    nextRunTime = null;
+    _logger.i('🛑 Background Service: Parado');
   }
 
   void dispose() {

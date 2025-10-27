@@ -1,14 +1,21 @@
 // File: lib/services/settings_service.dart
+import 'package:logger/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsService {
+  final Logger _logger;
+
   late String ip;
   late String port;
   late int interval;
   late String moduleId;
   late String sector;
   late String floor;
-  late String token; // <-- ADICIONADO
+  late String token;
+
+  SettingsService(this._logger) {
+    _logger.i('SettingsService inicializado');
+  }
 
   Future<void> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
@@ -18,7 +25,8 @@ class SettingsService {
     moduleId = prefs.getString('module_id') ?? '';
     sector = prefs.getString('manual_sector') ?? '';
     floor = prefs.getString('manual_floor') ?? '';
-    token = prefs.getString('auth_token') ?? ''; // <-- ADICIONADO
+    token = prefs.getString('auth_token') ?? '';
+    _logger.d('Configurações carregadas');
   }
 
   Future<void> saveSettings({
@@ -28,7 +36,7 @@ class SettingsService {
     required String newModuleId,
     required String newSector,
     required String newFloor,
-    required String newToken, // <-- ADICIONADO
+    required String newToken,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('server_ip', newIp);
@@ -37,7 +45,7 @@ class SettingsService {
     await prefs.setString('module_id', newModuleId);
     await prefs.setString('manual_sector', newSector);
     await prefs.setString('manual_floor', newFloor);
-    await prefs.setString('auth_token', newToken); // <-- ADICIONADO
+    await prefs.setString('auth_token', newToken); 
     
     // Atualiza as variáveis locais
     ip = newIp;
@@ -46,7 +54,8 @@ class SettingsService {
     moduleId = newModuleId;
     sector = newSector;
     floor = newFloor;
-    token = newToken; // <-- ADICIONADO
+    token = newToken;
+    
+    _logger.i('Configurações salvas: Módulo $newModuleId, Servidor $newIp:$newPort');
   }
 }
-

@@ -11,19 +11,25 @@ dependencies:
     sdk: flutter
   
   # HTTP e comunicação
+  # ... outras dependências
   http: ^1.1.0
-  
-  # Armazenamento local
   shared_preferences: ^2.2.2
-  
-  # Background service
   flutter_background_service: ^5.0.0
- 
-  
-  # System tray e window manager
   system_tray: ^2.0.3
   window_manager: ^0.3.6
 
+  # === NOVOS PACOTES ADICIONADOS ===
+  # Para Gerenciamento de Estado
+  provider: ^6.1.2 
+  
+  # Para Injeção de Dependência (Service Locator)
+  get_it: ^7.7.0 
+  
+  # Para Logging
+  logger: ^2.3.0
+  path_provider: ^2.1.3 # Necessário para o logger de arquivo
+  intl: ^0.20.2
+  
 dev_dependencies:
   flutter_test:
     sdk: flutter

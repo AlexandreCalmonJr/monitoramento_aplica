@@ -3,9 +3,17 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:agent_windows/background_service.dart';
-import 'package:agent_windows/screens/home_screen.dart';
-import 'package:flutter/foundation.dart'; // <-- ADICIONADO
+import 'package:agent_windows/providers/agent_provider.dart';
+// PLACEHOLDER: Estes arquivos serão criados no Passo 3
+// Nós os definimos aqui para o 'HomeScreenRouter' funcionar
+import 'package:agent_windows/screens/onboarding_screen.dart';
+import 'package:agent_windows/screens/status_screen.dart';
+import 'package:agent_windows/services/service_locator.dart';
+import 'package:agent_windows/utils/app_logger.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:logger/logger.dart';
+import 'package:provider/provider.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -13,21 +21,45 @@ import 'package:window_manager/window_manager.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Configuração para o gerenciador de janela
-  await windowManager.ensureInitialized();
-  
-  // Inicia o serviço de background (Windows Timer)
-  await BackgroundService().initialize();
+  // 1. Inicializar Logger
+  await AppLogger.initialize();
+  final logger = AppLogger.logger;
 
-  // Configuração da bandeja do sistema (System Tray)
-  bool trayInitialized = false; // <-- ADICIONADO
-  if (Platform.isWindows) {
-    trayInitialized = await initSystemTray(); // <-- MODIFICADO
+  // 2. Configurar Service Locator
+  try {
+    setupLocator();
+    logger.i('Service Locator configurado');
+  } catch (e) {
+    logger.e('Erro ao configurar Service Locator: $e');
   }
 
-  runApp(const AgentApp());
+  // 3. Configuração para o gerenciador de janela
+  await windowManager.ensureInitialized();
+  
+  // 4. Inicia o serviço de background
+  // Nós obtemos a instância do locator
+  try {
+    await locator<BackgroundService>().initialize();
+    logger.i('Background Service inicializado');
+  } catch (e) {
+    logger.e('Erro ao inicializar Background Service: $e');
+  }
+  
+  // 5. Configuração da bandeja do sistema (System Tray)
+  bool trayInitialized = false; 
+  if (Platform.isWindows) {
+    trayInitialized = await initSystemTray();
+  }
 
-  // Esconde a janela principal após a inicialização
+  // 6. Rodar o App com o Provider
+  runApp(
+    ChangeNotifierProvider(
+      create: (context) => AgentProvider(),
+      child: const AgentApp(),
+    ),
+  );
+
+  // 7. Esconde a janela principal após a inicialização
   if (Platform.isWindows) {
     const WindowOptions windowOptions = WindowOptions(
       center: true,
@@ -36,79 +68,75 @@ Future<void> main() async {
       titleBarStyle: TitleBarStyle.normal,
     );
     windowManager.waitUntilReadyToShow(windowOptions, () async {
-      // SÓ ESCONDE SE A BANDEJA DO SISTEMA FUNCIONAR
-      if (trayInitialized) { // <-- MODIFICADO
-        await windowManager.hide(); // Começa escondido
+      if (trayInitialized) {
+        await windowManager.hide(); 
       } else {
-        await windowManager.show(); // Mostra se a bandeja falhar
+        logger.w('Bandeja do sistema falhou, mostrando janela principal');
+        await windowManager.show();
       }
     });
   }
 }
 
-// MODIFICADO: Retorna 'bool' para indicar sucesso ou falha
 Future<bool> initSystemTray() async {
   final SystemTray systemTray = SystemTray();
   String iconPath = '';
+  final logger = locator<Logger>(); // Obtém logger do locator
 
   try {
-    // Lógica de path mais robusta para Debug e Release
     if (kDebugMode) {
-      // Em modo Debug, o path é relativo à raiz do projeto
       iconPath = 'assets/app_icon.ico';
-      debugPrint('Modo Debug: Usando path do ícone: $iconPath');
+      logger.d('Modo Debug: Usando path do ícone: $iconPath');
     } else {
-      // Em modo Release, o path é relativo ao executável
       final exeDir = File(Platform.resolvedExecutable).parent.path;
       iconPath = '$exeDir/data/flutter_assets/assets/app_icon.ico';
-      debugPrint('Modo Release: Usando path do ícone: $iconPath');
+      logger.d('Modo Release: Usando path do ícone: $iconPath');
     }
     
     final iconFile = File(iconPath);
     if (!await iconFile.exists()) {
-      debugPrint('Aviso: Ícone não encontrado em $iconPath');
-      debugPrint('Crie um arquivo assets/app_icon.ico para habilitar a bandeja');
-      return false; // <-- MODIFICADO: Retorna falha
+      logger.e('Ícone não encontrado em $iconPath');
+      return false;
     }
 
     await systemTray.initSystemTray(
       title: "Agente de Monitoramento",
-      iconPath: iconPath, // Usa o path correto
+      iconPath: iconPath,
     );
 
+    // === NOVO MENU (Sugestão UX 3) ===
     final Menu menu = Menu();
     await menu.buildFrom([
       MenuItemLabel(
-        label: 'Abrir Agente', 
+        label: 'Abrir Painel', 
         onClicked: (menuItem) => windowManager.show()
       ),
       MenuItemLabel(
-        label: 'Fechar', 
+        label: 'Forçar Sincronização',
+        onClicked: (menuItem) async {
+          logger.i('Sincronização forçada pelo usuário');
+          // TODO: Implementar notificação na bandeja (displayMessage não existe no system_tray)
+          // systemTray.displayMessage(
+          //   "Agente de Monitoramento",
+          //   "Iniciando sincronização forçada...",
+          // );
+          await locator<BackgroundService>().runCycle();
+          // systemTray.displayMessage(
+          //   "Agente de Monitoramento",
+          //   "Sincronização concluída.",
+          // );
+        }
+      ),
+      MenuSeparator(),
+      MenuItemLabel(
+        label: 'Fechar Agente', 
         onClicked: (menuItem) {
-          BackgroundService().stop();
+          locator<BackgroundService>().stop();
           exit(0);
-        }
-      ),
-      MenuItemLabel(
-        label: 'Reiniciar Serviço',
-        onClicked: (menuItem) {
-          BackgroundService().initialize();
-        }
-      ),
-      MenuItemLabel(
-        label: 'Fechar', 
-        onClicked: (menuItem) {
-          BackgroundService().stop();
-          exit(0);
-        }
-      ),
-      MenuItemLabel(
-        label: 'Reiniciar Serviço',
-        onClicked: (menuItem) {
-          BackgroundService().initialize();
         }
       ),
     ]);
+    // ===================================
 
     await systemTray.setContextMenu(menu);
 
@@ -120,13 +148,12 @@ Future<bool> initSystemTray() async {
       }
     });
 
-    debugPrint("Bandeja do sistema inicializada com sucesso.");
-    return true; // <-- MODIFICADO: Retorna sucesso
+    logger.i("Bandeja do sistema inicializada com sucesso.");
+    return true;
 
   } catch (e) {
-    debugPrint('Erro ao inicializar bandeja do sistema: $e');
-    // Continua sem a bandeja do sistema se houver erro
-    return false; // <-- MODIFICADO: Retorna falha
+    logger.e('Erro ao inicializar bandeja do sistema: $e');
+    return false;
   }
 }
 
@@ -185,7 +212,34 @@ class AgentApp extends StatelessWidget {
           bodyMedium: TextStyle(color: Colors.white70),
         ),
       ),
-      home: const HomeScreen(),
+      // HomeScreen agora será o nosso "Roteador"
+      home: const HomeScreenRouter(),
+    );
+  }
+}
+
+// NOVO WIDGET: Roteia para Onboarding ou Painel de Status
+class HomeScreenRouter extends StatelessWidget {
+  const HomeScreenRouter({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // Assiste ao status do provider
+    final status = context.watch<AgentProvider>().status;
+
+    // Use um AnimatedSwitcher para uma transição suave
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: switch (status) {
+        // As telas reais serão criadas no Passo 3
+        AgentStatus.configured => StatusScreen(), 
+        AgentStatus.unconfigured || AgentStatus.configuring => OnboardingScreen(),
+        // Estado de carregamento inicial
+        _ => const Scaffold(
+            backgroundColor: Color(0xFF1A202C),
+            body: Center(child: CircularProgressIndicator()),
+           ),
+      },
     );
   }
 }

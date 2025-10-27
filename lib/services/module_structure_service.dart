@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:agent_windows/services/auth_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:logger/logger.dart';
 
 class ModuleField {
   final String name;
@@ -66,16 +67,21 @@ class ModuleStructure {
 }
 
 class ModuleStructureService {
-  final AuthService _authService = AuthService();
+  final Logger _logger;
+  final AuthService _authService;
+
+  ModuleStructureService(this._logger, this._authService, {required AuthService authService, DebugPrintCallback? logger}) {
+    _logger.i('ModuleStructureService inicializado');
+  }
   
   /// Busca a estrutura completa de um módulo específico
   Future<ModuleStructure?> fetchModuleStructure({
     required String serverUrl,
-    required String token,
+    required String token, // Token ainda é passado para garantir o uso do token correto durante o fetch
     required String moduleId,
   }) async {
     try {
-      debugPrint('🔍 Buscando estrutura do módulo: $moduleId');
+      _logger.i('🔍 Buscando estrutura do módulo: $moduleId');
       
       // Usa os headers do AuthService
       final headers = _authService.getHeaders();
@@ -89,20 +95,20 @@ class ModuleStructureService {
         final data = json.decode(response.body);
         final structure = ModuleStructure.fromJson(data['module']);
         
-        debugPrint('✅ Estrutura do módulo carregada: ${structure.name}');
-        debugPrint('   Tipo: ${structure.type}');
-        debugPrint('   Campos customizados: ${structure.fields.length}');
+        _logger.i('✅ Estrutura do módulo carregada: ${structure.name}');
+        _logger.d('   Tipo: ${structure.type}');
+        _logger.d('   Campos customizados: ${structure.fields.length}');
         
         return structure;
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        debugPrint('❌ Token inválido ou expirado');
+        _logger.w('❌ Token inválido ou expirado ao buscar estrutura');
         throw Exception('Token inválido ou expirado');
       } else {
-        debugPrint('❌ Erro ao buscar estrutura: ${response.statusCode}');
+        _logger.e('❌ Erro ao buscar estrutura: ${response.statusCode}');
         throw Exception('Erro ao buscar estrutura: ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('❌ Exceção ao buscar estrutura do módulo: $e');
+      _logger.e('❌ Exceção ao buscar estrutura do módulo: $e');
       return null;
     }
   }

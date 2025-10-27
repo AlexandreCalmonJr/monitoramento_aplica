@@ -1,16 +1,22 @@
 // File: lib/services/monitoring_service.dart
+// (ARQUIVO COMPLETO - PASSO 2)
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:agent_windows/services/auth_service.dart';
 import 'package:agent_windows/services/module_structure_service.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:logger/logger.dart';
 
 class MonitoringService {
-  final ModuleStructureService _moduleStructureService = ModuleStructureService();
-  final AuthService _authService = AuthService();
+  final Logger _logger;
+  final AuthService _authService;
+  final ModuleStructureService _moduleStructureService;
+
+  MonitoringService(this._logger, this._authService, this._moduleStructureService) {
+    _logger.i('MonitoringService inicializado');
+  }
   
   String _decodeOutput(dynamic output) {
     if (output is List<int>) {
@@ -28,86 +34,113 @@ class MonitoringService {
       if (result.exitCode == 0) {
         return stdoutString.trim();
       } else {
-        debugPrint("Erro no comando '$command ${args.join(' ')}': $stderrString");
+        _logger.w("Erro no comando '$command ${args.join(' ')}': $stderrString");
         return "";
       }
     } catch (e) {
-      debugPrint("Exceção no comando '$command ${args.join(' ')}': $e");
+      _logger.e("Exceção no comando '$command ${args.join(' ')}': $e");
       return "";
     }
   }
   
-  // === COLETA DE DADOS BASE (COMUM A TODOS OS MÓDULOS) ===
-  
-  Future<String> _getHostname() => _runCommand('hostname', []);
+  // === NOVOS MÉTODOS DE COLETA OTIMIZADOS ===
 
-  Future<String> _getSerialNumber() async {
-    final result = await _runCommand('wmic', ['bios', 'get', 'serialnumber']);
-    return result.split('\n').last.trim();
-  }
+  /// Executa um script PowerShell consolidado para obter informações do sistema.
+  /// Isso substitui 10-12 chamadas de processo separadas.
+  Future<Map<String, dynamic>> _getCoreSystemInfo() async {
+    const String scriptContent = r'''
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-  Future<String> _getModel() async {
-    final result = await _runCommand('wmic', ['computersystem', 'get', 'model']);
-    return result.split('\n').last.trim();
-  }
+$ErrorActionPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
 
-  Future<String> _getManufacturer() async {
-    final result = await _runCommand('wmic', ['computersystem', 'get', 'manufacturer']);
-    return result.split('\n').last.trim();
-  }
+$os = Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption, Version
+$cs = Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object Model, Manufacturer, TotalPhysicalMemory
+$bios = Get-CimInstance -ClassName Win32_BIOS | Select-Object SerialNumber
+$cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1 | Select-Object Name
+$volC = Get-Volume -DriveLetter C
+$disk = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq 0 } | Select-Object -First 1
+$net = Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias (Get-NetConnectionProfile).InterfaceAlias | Select-Object -First 1
+$mac = if ($net) { (Get-NetAdapter -InterfaceIndex $net.InterfaceIndex).MacAddress } else { $null }
+$av = Get-MpComputerStatus | Select-Object AntivirusEnabled, AMProductVersion
+$bitlocker = Get-BitLockerVolume -MountPoint C: | Select-Object -ExpandProperty ProtectionStatus
 
-  Future<String> _getProcessor() async {
-    final result = await _runCommand('wmic', ['cpu', 'get', 'name']);
-    return result.split('\n').last.trim();
-  }
+# Funções auxiliares para buscar no registro
+function Get-RegValue {
+    param($path, $name)
+    (Get-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue).$name
+}
 
-  Future<String> _getRam() async {
-    final result = await _runCommand('powershell', [
-      '-command',
-      r'Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty TotalPhysicalMemory | ForEach-Object { "$([math]::Round($_ / 1GB)) GB" }'
-    ]);
-    return result.isNotEmpty ? result : "N/A";
-  }
+$javaVersion = Get-RegValue -path "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment" -name "CurrentVersion"
+if ($javaVersion) {
+    $javaVersionPath = "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment\$javaVersion"
+    $javaVersion = Get-RegValue -path $javaVersionPath -name "JavaVersion"
+}
 
-  Future<Map<String, String>> _getStorage() async {
-    final result = await _runCommand('powershell', [
-      '-command',
-      r'''
-      $disk = Get-Volume -DriveLetter C
-      $totalGB = [math]::Round($disk.Size / 1GB, 2)
-      $usedGB = [math]::Round(($disk.Size - $disk.SizeRemaining) / 1GB, 2)
-      $type = (Get-PhysicalDisk | Where-Object { $_.DeviceID -eq 0 }).MediaType
-      Write-Output "$totalGB GB;$type"
-      '''
-    ]);
+$chromeVersion = (Get-RegValue -path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" -name "(default)" | Get-Item -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
+
+
+$data = [PSCustomObject]@{
+    hostname           = $env:COMPUTERNAME
+    serial_number      = $bios.SerialNumber
+    model              = $cs.Model
+    manufacturer       = $cs.Manufacturer
+    processor          = $cpu.Name
+    ram                = "$([math]::Round($cs.TotalPhysicalMemory / 1GB)) GB"
+    storage            = "$([math]::Round($volC.Size / 1GB, 2)) GB"
+    storage_type       = $disk.MediaType
+    operating_system   = $os.Caption
+    os_version         = $os.Version
+    ip_address         = $net.IPAddress
+    mac_address        = $mac
+    antivirus_status   = $av.AntivirusEnabled
+    antivirus_version  = $av.AMProductVersion
+    is_encrypted       = if ($bitlocker -eq "On") { $true } else { $false }
+    java_version       = $javaVersion
+    browser_version    = "Chrome $chromeVersion"
+}
+
+# Converte o objeto para JSON
+$data | ConvertTo-Json -Depth 2
+''';
+
+    final tempDir = Directory.systemTemp;
+    final scriptFile = File('${tempDir.path}\\monitor_core.ps1');
     
-    if (result.contains(';')) {
-      final parts = result.split(';');
-      return {
-        'storage': parts[0],
-        'storage_type': parts[1].trim(),
-      };
+    try {
+      await scriptFile.writeAsString(scriptContent, flush: true, encoding: utf8);
+
+      final result = await Process.run(
+        'powershell',
+        ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', scriptFile.path],
+        runInShell: true,
+      );
+      
+      final stdoutString = _decodeOutput(result.stdout);
+      final stderrString = _decodeOutput(result.stderr);
+
+      if (result.exitCode == 0 && stdoutString.isNotEmpty) {
+        final decodedJson = json.decode(stdoutString);
+        _logger.i('✅ Informações do sistema coletadas via script consolidado');
+        return decodedJson;
+      } else {
+        _logger.e('Erro ao executar script consolidado: $stderrString');
+        return {};
+      }
+    } catch (e) {
+      _logger.e("❌ Exceção ao executar script consolidado: $e");
+      return {};
+    } finally {
+      try {
+        if (await scriptFile.exists()) await scriptFile.delete();
+      } catch (_) {}
     }
-    return {'storage': 'N/A', 'storage_type': 'N/A'};
   }
 
-  Future<Map<String, String>> _getNetworkInfo() async {
-    final result = await _runCommand('powershell', [
-      '-command',
-      r'Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias (Get-NetConnectionProfile).InterfaceAlias | Select-Object -First 1 | ForEach-Object { $_.IPAddress + ";" + (Get-NetAdapter -InterfaceIndex $_.InterfaceIndex).MacAddress }'
-    ]);
-    if (result.contains(';')) {
-      final parts = result.split(';');
-      return {'ip_address': parts[0], 'mac_address': parts[1]};
-    }
-    return {'ip_address': 'N/A', 'mac_address': 'N/A'};
-  }
-
-  // === COLETA DE DADOS ESPECÍFICOS POR TIPO ===
-
-  /// Desktop/Notebook: Software instalado
+  /// Coleta programas instalados (script separado, pois pode ser lento)
   Future<List<String>> _getInstalledPrograms() async {
-    debugPrint("--- INICIANDO COLETA DE PROGRAMAS ---");
+    _logger.i("--- Iniciando coleta de programas ---");
     try {
       const command = 'powershell';
       const script = r'Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object { $_.DisplayName -ne $null } | Select-Object DisplayName, DisplayVersion | ForEach-Object { "$($_.DisplayName) version $($_.DisplayVersion)" } | Sort-Object -Unique';
@@ -115,75 +148,22 @@ class MonitoringService {
       final result = await _runCommand(command, ['-command', script]);
       if (result.isNotEmpty && !result.startsWith("Erro")) {
         final programs = result.split('\n').where((s) => s.trim().isNotEmpty).toList();
-        debugPrint("✅ ${programs.length} programas encontrados");
+        _logger.i("✅ ${programs.length} programas encontrados");
         return programs;
       }
     } catch (e) {
-      debugPrint("❌ Erro ao coletar programas: $e");
+      _logger.e("❌ Erro ao coletar programas: $e");
     }
     return [];
   }
 
-  /// Desktop: Versão do Java
-  Future<String> _getJavaVersion() async {
-    try {
-      final result = await _runCommand('java', ['-version']);
-      final lines = result.split('\n');
-      if (lines.isNotEmpty) {
-        return lines.first.trim();
-      }
-    } catch (e) {
-      debugPrint("Java não instalado ou não encontrado no PATH");
-    }
-    return 'N/A';
-  }
-
-  /// Desktop: Versão do navegador
-  Future<String> _getBrowserVersion() async {
-    try {
-      final result = await _runCommand('powershell', [
-        '-command',
-        r'''
-        $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' -ErrorAction SilentlyContinue).'(default)'
-        if ($chrome) {
-          (Get-Item $chrome).VersionInfo.FileVersion
-        }
-        '''
-      ]);
-      return result.isNotEmpty ? "Chrome $result" : 'N/A';
-    } catch (e) {
-      return 'N/A';
-    }
-  }
-
-  /// Desktop: Status do antivírus
-  Future<Map<String, dynamic>> _getAntivirusStatus() async {
-    try {
-      final result = await _runCommand('powershell', [
-        '-command',
-        r'Get-MpComputerStatus | Select-Object AntivirusEnabled, AMProductVersion | ConvertTo-Json'
-      ]);
-      
-      if (result.isNotEmpty) {
-        final data = json.decode(result);
-        return {
-          'antivirus_status': data['AntivirusEnabled'] ?? false,
-          'antivirus_version': data['AMProductVersion'] ?? 'N/A',
-        };
-      }
-    } catch (e) {
-      debugPrint("Erro ao coletar status do antivírus: $e");
-    }
-    return {'antivirus_status': false, 'antivirus_version': 'N/A'};
-  }
-
-  /// Notebook: Bateria
+  /// Notebook: Bateria (script separado, pois é WMI e específico)
   Future<Map<String, dynamic>> _getBatteryInfo() async {
     try {
       final result = await _runCommand('powershell', [
         '-command',
         r'''
-        $battery = Get-WmiObject Win32_Battery
+        $battery = Get-WmiObject Win32_Battery -ErrorAction SilentlyContinue
         if ($battery) {
           $level = $battery.EstimatedChargeRemaining
           $health = if ($battery.BatteryStatus -eq 2) { "Carregando" } else { "OK" }
@@ -194,32 +174,21 @@ class MonitoringService {
       
       if (result.contains(';')) {
         final parts = result.split(';');
+        _logger.i('✅ Informações da bateria coletadas');
         return {
           'battery_level': int.tryParse(parts[0]),
           'battery_health': parts[1],
         };
       }
     } catch (e) {
-      debugPrint("Erro ao coletar informações da bateria: $e");
+      _logger.e("Erro ao coletar informações da bateria: $e");
     }
     return {'battery_level': null, 'battery_health': 'N/A'};
   }
 
-  /// Notebook: Status de criptografia (BitLocker)
-  Future<bool> _isEncrypted() async {
-    try {
-      final result = await _runCommand('powershell', [
-        '-command',
-        'Get-BitLockerVolume -MountPoint C: | Select-Object -ExpandProperty ProtectionStatus'
-      ]);
-      return result.toLowerCase().contains('on');
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /// Desktop: Periféricos (Biométrico e Impressora)
+  /// Desktop: Periféricos (script separado e complexo)
   Future<Map<String, String>> _getPeripherals() async {
+    _logger.i("--- Iniciando coleta de periféricos ---");
     const String scriptContent = r'''
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -286,10 +255,10 @@ Write-Output "BIOMETRIC:$biometricStatus"
           devices['biometric'] = trimmedLine.substring('BIOMETRIC:'.length).trim();
         }
       }
-      
+      _logger.i('✅ Periféricos verificados');
       return devices;
     } catch (e) {
-      debugPrint("❌ Erro ao detectar periféricos: $e");
+      _logger.e("❌ Erro ao detectar periféricos: $e");
       return {
         'zebra': 'Erro',
         'bematech': 'Erro',
@@ -312,12 +281,12 @@ Write-Output "BIOMETRIC:$biometricStatus"
     String? manualFloor,
   }) async {
     if (serverUrl.isEmpty || moduleId.isEmpty || token.isEmpty) {
-      debugPrint('❌ Configurações incompletas. Abortando envio.');
+      _logger.w('❌ Configurações incompletas. Abortando envio.');
       return;
     }
 
-    debugPrint('\n🔄 INICIANDO CICLO DE MONITORAMENTO');
-    debugPrint('📋 Módulo: $moduleId');
+    _logger.i('🔄 INICIANDO CICLO DE MONITORAMENTO');
+    _logger.d('📋 Módulo: $moduleId');
 
     try {
       // 1. Buscar estrutura do módulo
@@ -334,29 +303,41 @@ Write-Output "BIOMETRIC:$biometricStatus"
         throw Exception('Não foi possível obter a estrutura do módulo');
       }
 
-      debugPrint('📦 Tipo do módulo: ${structure.type}');
+      _logger.i('📦 Tipo do módulo: ${structure.type}');
 
       // 2. Coletar dados base (comuns a todos)
-      final serialNumber = await _getSerialNumber();
-      if (serialNumber.isEmpty || serialNumber.toLowerCase().contains('error')) {
-        throw Exception('Não foi possível obter o número de série');
+      // Executa o script consolidado
+      Map<String, dynamic> coreInfo = await _getCoreSystemInfo();
+
+      if (coreInfo.isEmpty || (coreInfo['serial_number'] as String?).toString().isEmpty) {
+        throw Exception('Não foi possível obter informações do sistema (serial number nulo)');
       }
 
-      final networkInfo = await _getNetworkInfo();
-      final storageInfo = await _getStorage();
-
+      // Preenche o payload inicial com dados do script
       Map<String, dynamic> payload = {
-        'asset_name': await _getHostname(),
-        'serial_number': serialNumber,
-        'ip_address': networkInfo['ip_address'],
-        'mac_address': networkInfo['mac_address'],
+        'asset_name': coreInfo['hostname'] ?? 'N/A',
+        'serial_number': coreInfo['serial_number'] ?? 'N/A',
+        'ip_address': coreInfo['ip_address'] ?? 'N/A',
+        'mac_address': coreInfo['mac_address'] ?? 'N/A',
         'location': '',
-        'assigned_to': await _runCommand('whoami', []),
-        'hostname': await _getHostname(),
-        'model': await _getModel(),
-        'manufacturer': await _getManufacturer(),
-        'operating_system': Platform.operatingSystem,
-        'os_version': Platform.operatingSystemVersion,
+        'assigned_to': await _runCommand('whoami', []), // Mantém separado, é rápido
+        'hostname': coreInfo['hostname'] ?? 'N/A',
+        'model': coreInfo['model'] ?? 'N/A',
+        'manufacturer': coreInfo['manufacturer'] ?? 'N/A',
+        'operating_system': coreInfo['operating_system'] ?? Platform.operatingSystem,
+        'os_version': coreInfo['os_version'] ?? Platform.operatingSystemVersion,
+        
+        // Adiciona dados que já foram coletados pelo script
+        'processor': coreInfo['processor'] ?? 'N/A',
+        'ram': coreInfo['ram'] ?? 'N/A',
+        'storage': coreInfo['storage'] ?? 'N/A',
+        'storage_type': coreInfo['storage_type'] ?? 'N/A',
+        'antivirus_status': coreInfo['antivirus_status'] ?? false,
+        'antivirus_version': coreInfo['antivirus_version'] ?? 'N/A',
+        'is_encrypted': coreInfo['is_encrypted'] ?? false,
+        'java_version': coreInfo['java_version'] ?? 'N/A',
+        'browser_version': coreInfo['browser_version'] ?? 'N/A',
+
         'custom_data': {
           'sector': manualSector,
           'floor': manualFloor,
@@ -366,78 +347,57 @@ Write-Output "BIOMETRIC:$biometricStatus"
       // 3. Coletar dados específicos baseado no tipo
       switch (structure.type.toLowerCase()) {
         case 'desktop':
-          debugPrint('💻 Coletando dados de Desktop...');
+          _logger.i('💻 Coletando dados específicos de Desktop...');
           
-          payload.addAll({
-            'processor': await _getProcessor(),
-            'ram': await _getRam(),
-            'storage': storageInfo['storage'],
-            'storage_type': storageInfo['storage_type'],
-            'installed_software': await _getInstalledPrograms(),
-            'java_version': await _getJavaVersion(),
-            'browser_version': await _getBrowserVersion(),
-          });
+          // Coleta programas (lento, por isso separado)
+          payload['installed_software'] = await _getInstalledPrograms();
 
-          final antivirusInfo = await _getAntivirusStatus();
-          payload.addAll(antivirusInfo);
-
+          // Coleta periféricos (script separado)
           final peripherals = await _getPeripherals();
           payload['biometric_reader'] = peripherals['biometric'];
           payload['connected_printer'] = '${peripherals['zebra']} / ${peripherals['bematech']}';
           break;
 
         case 'notebook':
-          debugPrint('💼 Coletando dados de Notebook...');
+          _logger.i('💼 Coletando dados específicos de Notebook...');
           
-          payload.addAll({
-            'processor': await _getProcessor(),
-            'ram': await _getRam(),
-            'storage': storageInfo['storage'],
-            'installed_software': await _getInstalledPrograms(),
-            'is_encrypted': await _isEncrypted(),
-          });
+          // Coleta programas (lento, por isso separado)
+          payload['installed_software'] = await _getInstalledPrograms();
 
-          final antivirusInfo = await _getAntivirusStatus();
-          payload.addAll(antivirusInfo);
-
+          // Coleta bateria (separado)
           final batteryInfo = await _getBatteryInfo();
           payload.addAll(batteryInfo);
           break;
 
         case 'panel':
-          debugPrint('📺 Coletando dados de Panel...');
-          
+          _logger.i('📺 Coletando dados de Panel...');
           payload.addAll({
             'is_online': true,
-            'screen_size': 'N/A', // Requer hardware específico
+            'screen_size': 'N/A',
             'resolution': 'N/A',
             'firmware_version': 'N/A',
           });
           break;
 
         case 'printer':
-          debugPrint('🖨️  Coletando dados de Printer...');
-          
-          // Impressoras requerem detecção específica via rede
+          _logger.i('🖨️  Coletando dados de Printer...');
           payload.addAll({
             'connection_type': 'network',
             'printer_status': 'unknown',
-            'is_duplex': false,
-            'is_color': false,
           });
           break;
 
         default:
-          debugPrint('📦 Módulo customizado: apenas dados base');
+          _logger.i('📦 Módulo customizado: apenas dados base e do script principal');
       }
 
       // 4. Validar dados antes de enviar
       if (!_moduleStructureService.validateData(payload, structure.type)) {
-        debugPrint('⚠️  Alguns campos obrigatórios estão ausentes');
+        _logger.w('⚠️  Alguns campos obrigatórios estão ausentes');
       }
 
       // 5. Enviar dados para o servidor
-      debugPrint('📤 Enviando dados para $serverUrl/api/modules/$moduleId/assets');
+      _logger.i('📤 Enviando dados para $serverUrl/api/modules/$moduleId/assets');
 
       // Usa os headers do AuthService (JWT ou Legacy Token)
       final headers = _authService.getHeaders();
@@ -449,21 +409,21 @@ Write-Output "BIOMETRIC:$biometricStatus"
       ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        debugPrint('✅ Dados enviados com sucesso!');
-        debugPrint('📊 Resposta: ${response.body}');
+        _logger.i('✅ Dados enviados com sucesso!');
+        _logger.d('📊 Resposta: ${response.body}');
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        debugPrint('❌ Token inválido ou expirado');
+        _logger.w('❌ Token inválido ou expirado');
         throw Exception('Token inválido ou expirado');
       } else {
-        debugPrint('❌ Erro ao enviar: ${response.statusCode}');
-        debugPrint('   Corpo: ${response.body}');
+        _logger.e('❌ Erro ao enviar: ${response.statusCode}');
+        _logger.e('   Corpo: ${response.body}');
         throw Exception('Erro do servidor: ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('❌ ERRO no ciclo de monitoramento: $e');
+      _logger.e('❌ ERRO no ciclo de monitoramento: $e');
       rethrow;
     }
 
-    debugPrint('✅ CICLO DE MONITORAMENTO CONCLUÍDO\n');
+    _logger.i('✅ CICLO DE MONITORAMENTO CONCLUÍDO\n');
   }
 }
