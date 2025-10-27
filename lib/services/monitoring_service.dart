@@ -3,10 +3,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:agent_windows/services/auth_service.dart';
+import 'package:agent_windows/services/module_structure_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class MonitoringService {
+  final ModuleStructureService _moduleStructureService = ModuleStructureService();
+  final AuthService _authService = AuthService();
   
   String _decodeOutput(dynamic output) {
     if (output is List<int>) {
@@ -33,9 +37,8 @@ class MonitoringService {
     }
   }
   
-  // --- Funções de Coleta de Dados ---
-  // (Nenhuma alteração de _getHostname até _getAllDeviceStatus)
-
+  // === COLETA DE DADOS BASE (COMUM A TODOS OS MÓDULOS) ===
+  
   Future<String> _getHostname() => _runCommand('hostname', []);
 
   Future<String> _getSerialNumber() async {
@@ -66,12 +69,26 @@ class MonitoringService {
     return result.isNotEmpty ? result : "N/A";
   }
 
-  Future<String> _getStorage() async {
+  Future<Map<String, String>> _getStorage() async {
     final result = await _runCommand('powershell', [
       '-command',
-      r'Get-Volume -DriveLetter C | ForEach-Object { "Total: " + [math]::Round($_.Size / 1GB) + " GB" }'
+      r'''
+      $disk = Get-Volume -DriveLetter C
+      $totalGB = [math]::Round($disk.Size / 1GB, 2)
+      $usedGB = [math]::Round(($disk.Size - $disk.SizeRemaining) / 1GB, 2)
+      $type = (Get-PhysicalDisk | Where-Object { $_.DeviceID -eq 0 }).MediaType
+      Write-Output "$totalGB GB;$type"
+      '''
     ]);
-    return result.isNotEmpty ? result : "N/A";
+    
+    if (result.contains(';')) {
+      final parts = result.split(';');
+      return {
+        'storage': parts[0],
+        'storage_type': parts[1].trim(),
+      };
+    }
+    return {'storage': 'N/A', 'storage_type': 'N/A'};
   }
 
   Future<Map<String, String>> _getNetworkInfo() async {
@@ -81,11 +98,14 @@ class MonitoringService {
     ]);
     if (result.contains(';')) {
       final parts = result.split(';');
-      return {'ipAddress': parts[0], 'macAddress': parts[1]};
+      return {'ip_address': parts[0], 'mac_address': parts[1]};
     }
-    return {'ipAddress': 'N/A', 'macAddress': 'N/A'};
+    return {'ip_address': 'N/A', 'mac_address': 'N/A'};
   }
 
+  // === COLETA DE DADOS ESPECÍFICOS POR TIPO ===
+
+  /// Desktop/Notebook: Software instalado
   Future<List<String>> _getInstalledPrograms() async {
     debugPrint("--- INICIANDO COLETA DE PROGRAMAS ---");
     try {
@@ -94,186 +114,152 @@ class MonitoringService {
       
       final result = await _runCommand(command, ['-command', script]);
       if (result.isNotEmpty && !result.startsWith("Erro")) {
-        debugPrint("Método principal bem-sucedido");
         final programs = result.split('\n').where((s) => s.trim().isNotEmpty).toList();
-        
-        debugPrint("--- LISTA DE PROGRAMAS ENCONTRADOS (${programs.length}) ---");
-        for (var program in programs) {
-          debugPrint("- $program");
-        }
-        debugPrint("--- FIM DA LISTA DE PROGRAMAS ---");
-
+        debugPrint("✅ ${programs.length} programas encontrados");
         return programs;
       }
     } catch (e) {
-      debugPrint("Método principal gerou exceção: $e");
+      debugPrint("❌ Erro ao coletar programas: $e");
     }
-    
-    debugPrint("Não foi possível listar programas, retornando lista vazia");
     return [];
   }
 
-  Future<Map<String, String>> _getAllDeviceStatus() async {
+  /// Desktop: Versão do Java
+  Future<String> _getJavaVersion() async {
+    try {
+      final result = await _runCommand('java', ['-version']);
+      final lines = result.split('\n');
+      if (lines.isNotEmpty) {
+        return lines.first.trim();
+      }
+    } catch (e) {
+      debugPrint("Java não instalado ou não encontrado no PATH");
+    }
+    return 'N/A';
+  }
+
+  /// Desktop: Versão do navegador
+  Future<String> _getBrowserVersion() async {
+    try {
+      final result = await _runCommand('powershell', [
+        '-command',
+        r'''
+        $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' -ErrorAction SilentlyContinue).'(default)'
+        if ($chrome) {
+          (Get-Item $chrome).VersionInfo.FileVersion
+        }
+        '''
+      ]);
+      return result.isNotEmpty ? "Chrome $result" : 'N/A';
+    } catch (e) {
+      return 'N/A';
+    }
+  }
+
+  /// Desktop: Status do antivírus
+  Future<Map<String, dynamic>> _getAntivirusStatus() async {
+    try {
+      final result = await _runCommand('powershell', [
+        '-command',
+        r'Get-MpComputerStatus | Select-Object AntivirusEnabled, AMProductVersion | ConvertTo-Json'
+      ]);
+      
+      if (result.isNotEmpty) {
+        final data = json.decode(result);
+        return {
+          'antivirus_status': data['AntivirusEnabled'] ?? false,
+          'antivirus_version': data['AMProductVersion'] ?? 'N/A',
+        };
+      }
+    } catch (e) {
+      debugPrint("Erro ao coletar status do antivírus: $e");
+    }
+    return {'antivirus_status': false, 'antivirus_version': 'N/A'};
+  }
+
+  /// Notebook: Bateria
+  Future<Map<String, dynamic>> _getBatteryInfo() async {
+    try {
+      final result = await _runCommand('powershell', [
+        '-command',
+        r'''
+        $battery = Get-WmiObject Win32_Battery
+        if ($battery) {
+          $level = $battery.EstimatedChargeRemaining
+          $health = if ($battery.BatteryStatus -eq 2) { "Carregando" } else { "OK" }
+          Write-Output "$level;$health"
+        }
+        '''
+      ]);
+      
+      if (result.contains(';')) {
+        final parts = result.split(';');
+        return {
+          'battery_level': int.tryParse(parts[0]),
+          'battery_health': parts[1],
+        };
+      }
+    } catch (e) {
+      debugPrint("Erro ao coletar informações da bateria: $e");
+    }
+    return {'battery_level': null, 'battery_health': 'N/A'};
+  }
+
+  /// Notebook: Status de criptografia (BitLocker)
+  Future<bool> _isEncrypted() async {
+    try {
+      final result = await _runCommand('powershell', [
+        '-command',
+        'Get-BitLockerVolume -MountPoint C: | Select-Object -ExpandProperty ProtectionStatus'
+      ]);
+      return result.toLowerCase().contains('on');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Desktop: Periféricos (Biométrico e Impressora)
+  Future<Map<String, String>> _getPeripherals() async {
     const String scriptContent = r'''
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-Write-Output "=== INICIANDO DETECÇÃO DE DISPOSITIVOS ==="
 $zebraStatus = "Não detectado"
 $bematechStatus = "Não detectado"
 $biometricStatus = "Não detectado"
 
-function Get-PrinterStatusString($status) {
-    switch ($status) {
-        0 { return "Parado" }
-        1 { return "Outro" }
-        2 { return "Desconhecido" }
-        3 { return "Online" }
-        4 { return "Imprimindo" }
-        5 { return "Aquecendo" }
-        6 { return "Parado" }
-        7 { return "Offline" }
-        default { return "Status $status" }
-    }
-}
-
-# ========== MÉTODO 1: Get-Printer (Windows 10+) ==========
-Write-Output "[INFO] Tentando método Get-Printer..."
+# Buscar impressoras
 try {
     $allPrinters = Get-Printer -ErrorAction Stop
-    Write-Output "[INFO] Total de impressoras encontradas: $($allPrinters.Count)"
-    
     foreach ($printer in $allPrinters) {
-        Write-Output "[INFO] Impressora: $($printer.Name) | Status: $($printer.PrinterStatus)"
-        
         if ($printer.Name -match "Zebra|ZDesigner|ZD") {
             $zebraStatus = "Conectado - $($printer.PrinterStatus)"
-            Write-Output "[SUCESSO] Zebra detectada via Get-Printer: $($printer.Name)"
         }
-        
         if ($printer.Name -match "Bematech|MP-4200|MP4200") {
             $bematechStatus = "Conectado - $($printer.PrinterStatus)"
-            Write-Output "[SUCESSO] Bematech detectada via Get-Printer: $($printer.Name)"
         }
     }
-} catch {
-    Write-Output "[ERRO] Falha no Get-Printer: $_"
-}
+} catch {}
 
-# ========== MÉTODO 2: WMI Win32_Printer ==========
-Write-Output "[INFO] Tentando método WMI Win32_Printer..."
-try {
-    $wmiPrinters = Get-WmiObject -Class Win32_Printer -ErrorAction Stop
-    Write-Output "[INFO] WMI retornou $($wmiPrinters.Count) impressoras"
-    
-    foreach ($printer in $wmiPrinters) {
-        Write-Output "[INFO] WMI Impressora: $($printer.Name) | Status: $($printer.PrinterStatus)"
-        
-        if ($printer.Name -match "Zebra|ZDesigner|ZD" -and $zebraStatus -eq "Não detectado") {
-            $statusStr = Get-PrinterStatusString -status $printer.PrinterStatus
-            $zebraStatus = "Conectado - $statusStr"
-            Write-Output "[SUCESSO] Zebra detectada via WMI: $($printer.Name)"
-        }
-        
-        if ($printer.Name -match "Bematech|MP-4200|MP4200" -and $bematechStatus -eq "Não detectado") {
-            $statusStr = Get-PrinterStatusString -status $printer.PrinterStatus
-            $bematechStatus = "Conectado - $statusStr"
-            Write-Output "[SUCESSO] Bematech detectada via WMI: $($printer.Name)"
-        }
-    }
-} catch {
-    Write-Output "[ERRO] Falha no WMI: $_"
-}
-
-# ========== MÉTODO 3: Dispositivos USB (PnP) ==========
-Write-Output "[INFO] Verificando dispositivos USB..."
-try {
-    $usbDevices = Get-PnpDevice -Class "Printer","USB" -ErrorAction SilentlyContinue | Where-Object { $_.Status -ne "Unknown" }
-    
-    foreach ($device in $usbDevices) {
-        Write-Output "[INFO] Dispositivo USB: $($device.FriendlyName) | Status: $($device.Status)"
-        
-        if ($device.FriendlyName -match "Zebra|ZDesigner|ZD" -and $zebraStatus -eq "Não detectado") {
-            $zebraStatus = if ($device.Status -eq "OK") { "Conectado - USB" } else { "Detectado - USB ($($device.Status))" }
-            Write-Output "[SUCESSO] Zebra detectada via USB: $($device.FriendlyName)"
-        }
-        
-        if ($device.FriendlyName -match "Bematech|MP-4200|MP4200" -and $bematechStatus -eq "Não detectado") {
-            $bematechStatus = if ($device.Status -eq "OK") { "Conectado - USB" } else { "Detectado - USB ($($device.Status))" }
-            Write-Output "[SUCESSO] Bematech detectada via USB: $($device.FriendlyName)"
-        }
-    }
-} catch {
-    Write-Output "[ERRO] Falha ao verificar USB: $_"
-}
-
-# ========== MÉTODO 4: Registro do Windows ==========
-Write-Output "[INFO] Verificando registro do Windows..."
-try {
-    $regPaths = @(
-        "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Printers\*",
-        "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Print\Printers\*"
-    )
-    
-    foreach ($path in $regPaths) {
-        if (Test-Path $path) {
-            $printers = Get-ItemProperty $path -ErrorAction SilentlyContinue
-            foreach ($printer in $printers) {
-                $printerName = $printer.PSChildName
-                if ($printerName) {
-                    Write-Output "[INFO] Registro: $printerName"
-                    
-                    if ($printerName -match "Zebra|ZDesigner|ZD" -and $zebraStatus -eq "Não detectado") {
-                        $zebraStatus = "Detectado - Registro"
-                        Write-Output "[SUCESSO] Zebra no registro: $printerName"
-                    }
-                    
-                    if ($printerName -match "Bematech|MP-4200|MP4200" -and $bematechStatus -eq "Não detectado") {
-                        $bematechStatus = "Detectado - Registro"
-                        Write-Output "[SUCESSO] Bematech no registro: $printerName"
-                    }
-                }
-            }
-        }
-    }
-} catch {
-    Write-Output "[ERRO] Falha ao verificar registro: $_"
-}
-
-# ========== LEITOR BIOMÉTRICO ==========
-Write-Output "[INFO] Procurando leitor biométrico..."
+# Buscar leitor biométrico
 try {
     $biometricDevice = Get-PnpDevice -Class "Biometric" -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($biometricDevice) {
-        Write-Output "[INFO] Leitor encontrado por classe: $($biometricDevice.FriendlyName) | Status: $($biometricDevice.Status)"
         $biometricStatus = if ($biometricDevice.Status -eq "OK") { "Conectado" } else { "Detectado - $($biometricDevice.Status)" }
-    } else {
-        Write-Output "[INFO] Buscando por nome específico..."
-        $biometricDeviceByName = Get-PnpDevice | Where-Object { $_.FriendlyName -match "U are U|Digital Persona|Fingerprint|Biometric" } | Select-Object -First 1
-        if ($biometricDeviceByName) {
-            Write-Output "[INFO] Leitor encontrado: $($biometricDeviceByName.FriendlyName) | Status: $($biometricDeviceByName.Status)"
-            $biometricStatus = if ($biometricDeviceByName.Status -eq "OK") { "Conectado" } else { "Detectado - $($biometricDeviceByName.Status)" }
-        } else {
-            Write-Output "[INFO] Leitor biométrico não encontrado"
-        }
     }
-} catch {
-    Write-Output "[ERRO] Falha ao procurar leitor biométrico: $_"
-}
+} catch {}
 
-Write-Output "=== RESULTADOS FINAIS ==="
-Write-Output "RESULT_ZEBRA:$zebraStatus"
-Write-Output "RESULT_BEMATECH:$bematechStatus"
-Write-Output "RESULT_BIOMETRIC:$biometricStatus"
+Write-Output "ZEBRA:$zebraStatus"
+Write-Output "BEMATECH:$bematechStatus"
+Write-Output "BIOMETRIC:$biometricStatus"
 ''';
 
     final tempDir = Directory.systemTemp;
-    final scriptFile = File('${tempDir.path}\\monitor_device_detection.ps1');
+    final scriptFile = File('${tempDir.path}\\monitor_peripherals.ps1');
     
     try {
       await scriptFile.writeAsString(scriptContent, flush: true, encoding: utf8);
 
-      debugPrint("=== EXECUTANDO SCRIPT DE DETECÇÃO ===");
       final result = await Process.run(
         'powershell',
         ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', scriptFile.path],
@@ -281,16 +267,8 @@ Write-Output "RESULT_BIOMETRIC:$biometricStatus"
       );
       
       final stdoutString = _decodeOutput(result.stdout);
-      final stderrString = _decodeOutput(result.stderr);
 
-      debugPrint("=== SAÍDA DO SCRIPT ===");
-      debugPrint(stdoutString);
-      if (stderrString.isNotEmpty) {
-        debugPrint("=== ERROS DO SCRIPT ===");
-        debugPrint(stderrString);
-      }
-
-      Map<String, String> statuses = {
+      Map<String, String> devices = {
         'zebra': 'Não detectado',
         'bematech': 'Não detectado',
         'biometric': 'Não detectado'
@@ -300,120 +278,192 @@ Write-Output "RESULT_BIOMETRIC:$biometricStatus"
       for (String line in lines) {
         final trimmedLine = line.trim();
         
-        if (trimmedLine.startsWith('RESULT_ZEBRA:')) {
-          statuses['zebra'] = trimmedLine.substring('RESULT_ZEBRA:'.length).trim();
-          debugPrint(">>> Zebra Status: ${statuses['zebra']}");
-        } else if (trimmedLine.startsWith('RESULT_BEMATECH:')) {
-          statuses['bematech'] = trimmedLine.substring('RESULT_BEMATECH:'.length).trim();
-          debugPrint(">>> Bematech Status: ${statuses['bematech']}");
-        } else if (trimmedLine.startsWith('RESULT_BIOMETRIC:')) {
-          statuses['biometric'] = trimmedLine.substring('RESULT_BIOMETRIC:'.length).trim();
-          debugPrint(">>> Biometric Status: ${statuses['biometric']}");
+        if (trimmedLine.startsWith('ZEBRA:')) {
+          devices['zebra'] = trimmedLine.substring('ZEBRA:'.length).trim();
+        } else if (trimmedLine.startsWith('BEMATECH:')) {
+          devices['bematech'] = trimmedLine.substring('BEMATECH:'.length).trim();
+        } else if (trimmedLine.startsWith('BIOMETRIC:')) {
+          devices['biometric'] = trimmedLine.substring('BIOMETRIC:'.length).trim();
         }
       }
       
-      debugPrint("=== STATUS FINAL ===");
-      debugPrint("Zebra: ${statuses['zebra']}");
-      debugPrint("Bematech: ${statuses['bematech']}");
-      debugPrint("Biométrico: ${statuses['biometric']}");
-      
-      return statuses;
+      return devices;
     } catch (e) {
-      debugPrint("=== EXCEÇÃO FATAL ===");
-      debugPrint("Erro: $e");
+      debugPrint("❌ Erro ao detectar periféricos: $e");
       return {
-        'zebra': 'Erro ao detectar',
-        'bematech': 'Erro ao detectar',
-        'biometric': 'Erro ao detectar'
+        'zebra': 'Erro',
+        'bematech': 'Erro',
+        'biometric': 'Erro'
       };
     } finally {
       try {
-        if (await scriptFile.exists()) {
-          await scriptFile.delete();
-        }
-      } catch (e) {
-        debugPrint("Erro ao deletar arquivo temporário: $e");
-      }
+        if (await scriptFile.exists()) await scriptFile.delete();
+      } catch (_) {}
     }
   }
 
-  // --- Método Principal de Coleta e Envio ---
+  // === MÉTODO PRINCIPAL: COLETA E ENVIA DADOS DINAMICAMENTE ===
 
   Future<void> collectAndSendData({
     required String moduleId,
     required String serverUrl,
-    required String? token, // <-- ADICIONADO
+    required String token,
     String? manualSector,
     String? manualFloor,
   }) async {
-    // MODIFICADO: Adiciona verificação de token
-    if (serverUrl.isEmpty || moduleId.isEmpty || token == null || token.isEmpty) {
-      debugPrint('Servidor, Módulo ou Token não configurado. Abortando envio.');
+    if (serverUrl.isEmpty || moduleId.isEmpty || token.isEmpty) {
+      debugPrint('❌ Configurações incompletas. Abortando envio.');
       return;
     }
 
-    debugPrint('Coletando dados para o módulo $moduleId...');
+    debugPrint('\n🔄 INICIANDO CICLO DE MONITORAMENTO');
+    debugPrint('📋 Módulo: $moduleId');
 
     try {
-      // Coleta os dados base
+      // 1. Buscar estrutura do módulo
+      // Verifica e renova token se necessário
+      await _authService.refreshTokenIfNeeded(serverUrl: serverUrl);
+      
+      final structure = await _moduleStructureService.fetchModuleStructure(
+        serverUrl: serverUrl,
+        token: token,
+        moduleId: moduleId,
+      );
+
+      if (structure == null) {
+        throw Exception('Não foi possível obter a estrutura do módulo');
+      }
+
+      debugPrint('📦 Tipo do módulo: ${structure.type}');
+
+      // 2. Coletar dados base (comuns a todos)
       final serialNumber = await _getSerialNumber();
       if (serialNumber.isEmpty || serialNumber.toLowerCase().contains('error')) {
-        throw Exception('Não foi possível obter o número de série. Verifique as permissões.');
+        throw Exception('Não foi possível obter o número de série');
       }
 
       final networkInfo = await _getNetworkInfo();
+      final storageInfo = await _getStorage();
 
-      // Monta o payload base
       Map<String, dynamic> payload = {
         'asset_name': await _getHostname(),
         'serial_number': serialNumber,
-        'ip_address': networkInfo['ipAddress'],
-        'mac_address': networkInfo['macAddress'],
-        'location': '', // Deixamos o backend mapear, mas enviamos setor/andar
+        'ip_address': networkInfo['ip_address'],
+        'mac_address': networkInfo['mac_address'],
+        'location': '',
         'assigned_to': await _runCommand('whoami', []),
+        'hostname': await _getHostname(),
+        'model': await _getModel(),
+        'manufacturer': await _getManufacturer(),
+        'operating_system': Platform.operatingSystem,
+        'os_version': Platform.operatingSystemVersion,
         'custom_data': {
           'sector': manualSector,
           'floor': manualFloor,
         }
       };
+
+      // 3. Coletar dados específicos baseado no tipo
+      switch (structure.type.toLowerCase()) {
+        case 'desktop':
+          debugPrint('💻 Coletando dados de Desktop...');
+          
+          payload.addAll({
+            'processor': await _getProcessor(),
+            'ram': await _getRam(),
+            'storage': storageInfo['storage'],
+            'storage_type': storageInfo['storage_type'],
+            'installed_software': await _getInstalledPrograms(),
+            'java_version': await _getJavaVersion(),
+            'browser_version': await _getBrowserVersion(),
+          });
+
+          final antivirusInfo = await _getAntivirusStatus();
+          payload.addAll(antivirusInfo);
+
+          final peripherals = await _getPeripherals();
+          payload['biometric_reader'] = peripherals['biometric'];
+          payload['connected_printer'] = '${peripherals['zebra']} / ${peripherals['bematech']}';
+          break;
+
+        case 'notebook':
+          debugPrint('💼 Coletando dados de Notebook...');
+          
+          payload.addAll({
+            'processor': await _getProcessor(),
+            'ram': await _getRam(),
+            'storage': storageInfo['storage'],
+            'installed_software': await _getInstalledPrograms(),
+            'is_encrypted': await _isEncrypted(),
+          });
+
+          final antivirusInfo = await _getAntivirusStatus();
+          payload.addAll(antivirusInfo);
+
+          final batteryInfo = await _getBatteryInfo();
+          payload.addAll(batteryInfo);
+          break;
+
+        case 'panel':
+          debugPrint('📺 Coletando dados de Panel...');
+          
+          payload.addAll({
+            'is_online': true,
+            'screen_size': 'N/A', // Requer hardware específico
+            'resolution': 'N/A',
+            'firmware_version': 'N/A',
+          });
+          break;
+
+        case 'printer':
+          debugPrint('🖨️  Coletando dados de Printer...');
+          
+          // Impressoras requerem detecção específica via rede
+          payload.addAll({
+            'connection_type': 'network',
+            'printer_status': 'unknown',
+            'is_duplex': false,
+            'is_color': false,
+          });
+          break;
+
+        default:
+          debugPrint('📦 Módulo customizado: apenas dados base');
+      }
+
+      // 4. Validar dados antes de enviar
+      if (!_moduleStructureService.validateData(payload, structure.type)) {
+        debugPrint('⚠️  Alguns campos obrigatórios estão ausentes');
+      }
+
+      // 5. Enviar dados para o servidor
+      debugPrint('📤 Enviando dados para $serverUrl/api/modules/$moduleId/assets');
+
+      // Usa os headers do AuthService (JWT ou Legacy Token)
+      final headers = _authService.getHeaders();
       
-      // Adiciona dados específicos do Desktop/Notebook
-      // MODIFICADO: Corresponde ao endpoint POST /api/modules/:moduleId/assets
-      payload.addAll({
-        'hostname': payload['asset_name'],
-        'model': await _getModel(),
-        'manufacturer': await _getManufacturer(),
-        'processor': await _getProcessor(),
-        'ram': await _getRam(),
-        'storage': await _getStorage(),
-        'operating_system': Platform.operatingSystem,
-        'os_version': Platform.operatingSystemVersion,
-      });
-
-      debugPrint('Enviando dados para $serverUrl/api/modules/$moduleId/assets');
-
-      // MODIFICADO: Adiciona cabeçalho (Header) de autenticação
       final response = await http.post(
         Uri.parse('$serverUrl/api/modules/$moduleId/assets'),
-        headers: {
-          'Content-Type': 'application/json',
-          'AUTH_TOKEN': token, // <-- ALTERADO PARA AUTH_TOKEN
-        },
+        headers: headers,
         body: json.encode(payload),
       ).timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        debugPrint('Dados enviados com sucesso! Resposta: ${response.body}');
+        debugPrint('✅ Dados enviados com sucesso!');
+        debugPrint('📊 Resposta: ${response.body}');
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        debugPrint('Falha ao enviar dados. Token inválido ou expirado.');
-        throw Exception('Erro do servidor: Token inválido (${response.statusCode})');
+        debugPrint('❌ Token inválido ou expirado');
+        throw Exception('Token inválido ou expirado');
       } else {
-        debugPrint('Falha ao enviar dados. Status: ${response.statusCode}, Corpo: ${response.body}');
+        debugPrint('❌ Erro ao enviar: ${response.statusCode}');
+        debugPrint('   Corpo: ${response.body}');
         throw Exception('Erro do servidor: ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint('ERRO no ciclo de monitoramento: $e');
+      debugPrint('❌ ERRO no ciclo de monitoramento: $e');
+      rethrow;
     }
+
+    debugPrint('✅ CICLO DE MONITORAMENTO CONCLUÍDO\n');
   }
 }
-
