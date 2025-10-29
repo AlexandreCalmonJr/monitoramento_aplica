@@ -65,6 +65,13 @@ $net = Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias (Get-NetConnectionPr
 $mac = if ($net) { (Get-NetAdapter -InterfaceIndex $net.InterfaceIndex).MacAddress } else { $null }
 $av = Get-MpComputerStatus | Select-Object AntivirusEnabled, AMProductVersion
 $bitlocker = Get-BitLockerVolume -MountPoint C: | Select-Object -ExpandProperty ProtectionStatus
+$bssid = $null
+try {
+    $wifiProfile = (netsh wlan show interfaces) | Select-String "BSSID"
+    if ($wifiProfile) {
+        $bssid = ($wifiProfile -split ":")[1].Trim()
+    }
+} catch {}
 
 # Funções auxiliares para buscar no registro
 function Get-RegValue {
@@ -94,6 +101,7 @@ $data = [PSCustomObject]@{
     os_version         = $os.Version
     ip_address         = $net.IPAddress
     mac_address        = $mac
+    mac_address_radio  = $bssid
     antivirus_status   = $av.AntivirusEnabled
     antivirus_version  = $av.AMProductVersion
     is_encrypted       = if ($bitlocker -eq "On") { $true } else { $false }
@@ -319,7 +327,10 @@ Write-Output "BIOMETRIC:$biometricStatus"
         'serial_number': coreInfo['serial_number'] ?? 'N/A',
         'ip_address': coreInfo['ip_address'] ?? 'N/A',
         'mac_address': coreInfo['mac_address'] ?? 'N/A',
-        'location': '',
+        'mac_address_radio': coreInfo['mac_address_radio'] ?? 'N/A',
+        'location': coreInfo['location'] ?? 'N/A',
+        'assigned_by': await _runCommand('whoami', []),
+        // Mantém separado, é rápido
         'assigned_to': await _runCommand('whoami', []), // Mantém separado, é rápido
         'hostname': coreInfo['hostname'] ?? 'N/A',
         'model': coreInfo['model'] ?? 'N/A',
