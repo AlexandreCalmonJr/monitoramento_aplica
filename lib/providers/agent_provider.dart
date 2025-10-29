@@ -1,9 +1,9 @@
 // File: lib/providers/agent_provider.dart
 import 'dart:convert';
 
-import 'package:agent_windows/background_service.dart';
 import 'package:agent_windows/models/module_info.dart';
 import 'package:agent_windows/services/auth_service.dart';
+import 'package:agent_windows/services/background_service.dart';
 import 'package:agent_windows/services/module_structure_service.dart';
 import 'package:agent_windows/services/service_locator.dart';
 import 'package:agent_windows/services/settings_service.dart';

@@ -1,6 +1,6 @@
 // File: lib/services/service_locator.dart
-import 'package:agent_windows/background_service.dart';
 import 'package:agent_windows/services/auth_service.dart';
+import 'package:agent_windows/services/background_service.dart';
 import 'package:agent_windows/services/module_structure_service.dart';
 import 'package:agent_windows/services/monitoring_service.dart';
 import 'package:agent_windows/services/settings_service.dart';
