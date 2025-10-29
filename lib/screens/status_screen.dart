@@ -1,8 +1,8 @@
 // File: lib/screens/status_screen.dart
 import 'dart:async';
 
-import 'package:agent_windows/background_service.dart';
 import 'package:agent_windows/providers/agent_provider.dart';
+import 'package:agent_windows/services/background_service.dart';
 import 'package:agent_windows/services/service_locator.dart';
 import 'package:agent_windows/utils/app_logger.dart';
 import 'package:flutter/material.dart';

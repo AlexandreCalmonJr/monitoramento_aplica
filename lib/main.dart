@@ -2,12 +2,12 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:agent_windows/background_service.dart';
 import 'package:agent_windows/providers/agent_provider.dart';
 // PLACEHOLDER: Estes arquivos serão criados no Passo 3
 // Nós os definimos aqui para o 'HomeScreenRouter' funcionar
 import 'package:agent_windows/screens/onboarding_screen.dart';
 import 'package:agent_windows/screens/status_screen.dart';
+import 'package:agent_windows/services/background_service.dart';
 import 'package:agent_windows/services/service_locator.dart';
 import 'package:agent_windows/utils/app_logger.dart';
 import 'package:flutter/foundation.dart';
