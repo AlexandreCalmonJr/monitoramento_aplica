@@ -161,7 +161,7 @@ class AgentProvider extends ChangeNotifier {
         
         _moduleFetchStatus = ModuleFetchStatus.success;
         if (!testConnectionOnly) {
-          pageController.animateToPage(1, duration: Duration(milliseconds: 300), curve: Curves.easeInOut);
+          pageController.animateToPage(1, duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
         }
         notifyListeners();
         return true;
@@ -182,11 +182,11 @@ class AgentProvider extends ChangeNotifier {
   }
 
   void nextOnboardingPage() {
-    pageController.nextPage(duration: Duration(milliseconds: 300), curve: Curves.easeInOut);
+    pageController.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
   }
 
   void previousOnboardingPage() {
-    pageController.previousPage(duration: Duration(milliseconds: 300), curve: Curves.easeInOut);
+    pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
   }
 
   Future<bool> saveSettingsAndRestartService() async {

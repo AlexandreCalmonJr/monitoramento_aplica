@@ -232,8 +232,8 @@ class HomeScreenRouter extends StatelessWidget {
       duration: const Duration(milliseconds: 300),
       child: switch (status) {
         // As telas reais serão criadas no Passo 3
-        AgentStatus.configured => StatusScreen(), 
-        AgentStatus.unconfigured || AgentStatus.configuring => OnboardingScreen(),
+        AgentStatus.configured => const StatusScreen(), 
+        AgentStatus.unconfigured || AgentStatus.configuring => const OnboardingScreen(),
         // Estado de carregamento inicial
         _ => const Scaffold(
             backgroundColor: Color(0xFF1A202C),

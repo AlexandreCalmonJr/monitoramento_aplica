@@ -319,7 +319,7 @@ class _OnboardingStep3 extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<int>(
-            value: provider.selectedInterval,
+            initialValue: provider.selectedInterval,
             decoration: const InputDecoration(
               labelText: 'Intervalo de Sincronização',
               prefixIcon: Icon(Icons.timer_outlined),

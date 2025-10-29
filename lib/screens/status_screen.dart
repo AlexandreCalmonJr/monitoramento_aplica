@@ -57,7 +57,7 @@ class _StatusScreenState extends State<StatusScreen> {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A202C),
         title: const Text('Logs Recentes'),
-        content: Container(
+        content: SizedBox(
           width: 600,
           height: 400,
           child: SingleChildScrollView(
