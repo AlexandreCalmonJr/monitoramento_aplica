@@ -350,12 +350,24 @@ class _OnboardingStep3 extends StatelessWidget {
 
           // Identificação Manual
           _buildSectionHeader(
-            icon: Icons.location_on_outlined,
+            icon: Icons.label_outline, // <-- ÍCONE MUDADO
             title: 'Identificação Manual',
-            subtitle: 'Opcional: Localização física do dispositivo',
+            subtitle: 'Opcional: Nome do ativo e localização física', // <-- TEXTO MUDADO
             isSubheader: true,
           ),
           const SizedBox(height: 16),
+
+          // <-- NOVO CAMPO ADICIONADO AQUI
+          TextFormField(
+            controller: provider.assetNameController,
+            decoration: const InputDecoration(
+              labelText: 'Nome do Ativo (Opcional)',
+              prefixIcon: Icon(Icons.badge_outlined),
+              helperText: 'Deixe em branco para usar o nome do computador',
+            ),
+          ),
+          const SizedBox(height: 16), // <-- NOVO ESPAÇAMENTO
+
           Row(
             children: [
               Expanded(
@@ -390,7 +402,7 @@ class _OnboardingStep3 extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<int>(
-            initialValue: provider.selectedInterval,
+            value: provider.selectedInterval, // MUDADO de initialValue para value
             decoration: const InputDecoration(
               labelText: 'Intervalo de Sincronização',
               prefixIcon: Icon(Icons.timer_outlined),

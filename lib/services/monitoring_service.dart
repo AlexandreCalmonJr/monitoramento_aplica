@@ -1,13 +1,15 @@
 // File: lib/services/monitoring_service.dart
-// (VERSÃO ATUALIZADA - CORREÇÃO NOTEBOOK + IMPRESSORA + HOSTNAME VAZIO)
+// (VERSÃO ATUALIZADA - Scripts movidos para assets e asset_name manual)
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:agent_windows/services/auth_service.dart';
 import 'package:agent_windows/services/module_structure_service.dart';
+import 'package:flutter/services.dart' show rootBundle; // NOVO: Import para assets
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
+import 'package:path/path.dart' as p; // NOVO: Import para manipulação de paths
 
 class MonitoringService {
   final Logger _logger;
@@ -25,6 +27,7 @@ class MonitoringService {
     return output.toString();
   }
 
+  // MODIFICADO: _runCommand agora é para comandos simples
   Future<String> _runCommand(String command, List<String> args) async {
     try {
       final result = await Process.run(command, args, runInShell: true);
@@ -42,170 +45,78 @@ class MonitoringService {
       return "";
     }
   }
-  
-  // === MÉTODOS DE COLETA OTIMIZADOS ===
 
-  // ===================================================================
-  // ✅ ATUALIZADO: SCRIPT DE COLETA DO HOST (Correção asset_name/hostname)
-  // ===================================================================
-  Future<Map<String, dynamic>> _getCoreSystemInfo() async {
-  const String scriptContent = r'''
-$OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$ErrorActionPreference = 'SilentlyContinue'
-$ProgressPreference = 'SilentlyContinue'
-
-$os = Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption, Version
-$cs = Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object Model, Manufacturer, TotalPhysicalMemory
-$bios = Get-CimInstance -ClassName Win32_BIOS | Select-Object SerialNumber
-$cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1 | Select-Object Name
-$volC = Get-Volume -DriveLetter C
-$disk = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq 0 } | Select-Object -First 1
-
-# MELHORADO: Detecção de rede (prioriza WiFi se disponível)
-$wifiAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and ($_.InterfaceDescription -match "Wi-Fi|Wireless|802.11") } | Select-Object -First 1
-$ethernetAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and $_.InterfaceDescription -notmatch "Wi-Fi|Wireless|802.11|Virtual|Hyper-V" } | Select-Object -First 1
-
-# Prioriza WiFi, depois Ethernet
-$activeAdapter = if ($wifiAdapter) { $wifiAdapter } else { $ethernetAdapter }
-$net = if ($activeAdapter) { Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $activeAdapter.InterfaceIndex | Select-Object -First 1 } else { $null }
-$mac = if ($activeAdapter) { $activeAdapter.MacAddress } else { $null }
-
-$av = Get-MpComputerStatus | Select-Object AntivirusEnabled, AMProductVersion
-$bitlocker = Get-BitLockerVolume -MountPoint C: | Select-Object -ExpandProperty ProtectionStatus
-
-# MELHORADO: Coleta BSSID (múltiplos métodos)
-$bssid = $null
-$ssid = $null
-$signalQuality = $null
-
-# Método 1: netsh wlan (mais confiável)
-try {
-    $wlanInfo = netsh wlan show interfaces | Select-String "BSSID", "SSID", "Signal"
-    foreach ($line in $wlanInfo) {
-        $lineStr = $line.ToString().Trim()
-        if ($lineStr -match "BSSID\s+:\s+(.+)") { $bssid = $Matches[1].Trim() }
-        if ($lineStr -match "SSID\s+:\s+(.+)" -and $lineStr -notmatch "BSSID") { $ssid = $Matches[1].Trim() }
-        if ($lineStr -match "Signal\s+:\s+(\d+)%") { $signalQuality = $Matches[1].Trim() + "%" }
-    }
-} catch {}
-
-# Método 2: WMI (fallback)
-if (-not $bssid -and $wifiAdapter) {
-    try {
-        $wifiConfig = netsh wlan show interfaces | Out-String
-        if ($wifiConfig -match "BSSID\s+:\s+([0-9A-Fa-f:]{17})") {
-            $bssid = $Matches[1]
-        }
-    } catch {}
-}
-
-# NOVO: Detecta se é Notebook
-$isNotebook = $false
-$chassisTypes = @(8, 9, 10, 11, 14, 18, 21, 31, 32) # Tipos de chassis que indicam notebook
-$chassis = (Get-CimInstance -ClassName Win32_SystemEnclosure).ChassisTypes
-foreach ($type in $chassis) {
-    if ($chassisTypes -contains $type) {
-        $isNotebook = $true
-        break
-    }
-}
-
-# Java e Browser
-function Get-RegValue { param($path, $name) (Get-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue).$name }
-$javaVersion = Get-RegValue -path "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment" -name "CurrentVersion"
-if ($javaVersion) { $javaVersionPath = "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment\$javaVersion"; $javaVersion = Get-RegValue -path $javaVersionPath -name "JavaVersion" }
-$chromeVersion = (Get-RegValue -path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" -name "(default)" | Get-Item -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
-
-# Validação de Hostname e Serial
-$hostname = $env:COMPUTERNAME
-$serial = $bios.SerialNumber
-
-if (-not $hostname -or $hostname.Trim() -eq "") {
-    $hostname = $serial
-}
-
-if (-not $serial -or $serial.Trim() -eq "" -or $serial -match "000000" -or $serial -match "N/A") {
-    $serial = $hostname
-}
-
-if (-not $hostname -or $hostname.Trim() -eq "") {
-    $hostname = "HostDesconhecido"
-}
-if (-not $serial -or $serial.Trim() -eq "") {
-    $serial = $hostname
-}
-
-# NOVO: Determina o tipo de conexão
-$connectionType = if ($wifiAdapter -and $wifiAdapter.Status -eq "Up") { "WiFi" } 
-                  elseif ($ethernetAdapter) { "Ethernet" } 
-                  else { "Desconhecido" }
-
-$data = [PSCustomObject]@{
-    hostname           = $hostname.Trim()
-    serial_number      = $serial.Trim()
-    model              = $cs.Model
-    manufacturer       = $cs.Manufacturer
-    processor          = $cpu.Name
-    ram                = "$([math]::Round($cs.TotalPhysicalMemory / 1GB)) GB"
-    storage            = "$([math]::Round($volC.Size / 1GB, 2)) GB"
-    storage_type       = $disk.MediaType
-    operating_system   = $os.Caption
-    os_version         = $os.Version
-    ip_address         = $net.IPAddress
-    mac_address        = $mac
-    mac_address_radio  = $bssid
-    wifi_ssid          = $ssid
-    wifi_signal        = $signalQuality
-    connection_type    = $connectionType
-    is_notebook        = $isNotebook
-    antivirus_status   = $av.AntivirusEnabled
-    antivirus_version  = $av.AMProductVersion
-    is_encrypted       = if ($bitlocker -eq "On") { $true } else { $false }
-    java_version       = $javaVersion
-    browser_version    = "Chrome $chromeVersion"
-}
-$data | ConvertTo-Json -Depth 2
-''';
-
+  // NOVO: Função auxiliar para carregar, salvar e executar scripts dos assets
+  Future<String> _runScript(String scriptName) async {
     final tempDir = Directory.systemTemp;
-    final scriptFile = File('${tempDir.path}\\monitor_core.ps1');
-    
+    final scriptFile = File(p.join(tempDir.path, scriptName));
+
     try {
+      // Carrega o script dos assets
+      final scriptContent = await rootBundle.loadString('assets/scripts/$scriptName');
+      // Salva o script em um arquivo temporário
       await scriptFile.writeAsString(scriptContent, flush: true, encoding: utf8);
+
+      // Executa o arquivo de script temporário
       final result = await Process.run(
         'powershell',
         ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', scriptFile.path],
         runInShell: true,
       );
+      
       final stdoutString = _decodeOutput(result.stdout);
       final stderrString = _decodeOutput(result.stderr);
 
-      if (result.exitCode == 0 && stdoutString.isNotEmpty) {
+      if (result.exitCode == 0) {
+        return stdoutString.trim();
+      } else {
+        _logger.w("Erro no script '$scriptName': $stderrString");
+        return "";
+      }
+    } catch (e) {
+      _logger.e("Exceção ao executar script '$scriptName': $e");
+      return "";
+    } finally {
+      // Limpa o arquivo temporário
+      try {
+        if (await scriptFile.exists()) {
+          await scriptFile.delete();
+        }
+      } catch (e) {
+        _logger.w('Falha ao deletar script temporário: ${scriptFile.path}, $e');
+      }
+    }
+  }
+  
+  // === MÉTODOS DE COLETA OTIMIZADOS ===
+
+  // ===================================================================
+  // ✅ ATUALIZADO: SCRIPT DE COLETA DO HOST (Agora usa _runScript)
+  // ===================================================================
+  Future<Map<String, dynamic>> _getCoreSystemInfo() async {
+    // MODIFICADO: Chama o _runScript com o nome do arquivo
+    final stdoutString = await _runScript('get_core_system_info.ps1');
+
+    if (stdoutString.isNotEmpty) {
+      try {
         final decodedJson = json.decode(stdoutString);
         _logger.i('✅ Informações do sistema coletadas via script consolidado');
         return decodedJson;
-      } else {
-        _logger.e('Erro ao executar script consolidado: $stderrString');
-        return {};
+      } catch (e) {
+         _logger.e('Erro ao decodificar JSON do get_core_system_info.ps1: $e');
+         return {};
       }
-    } catch (e) {
-      _logger.e("❌ Exceção ao executar script consolidado: $e");
-      return {};
-    } finally {
-      try {
-        if (await scriptFile.exists()) await scriptFile.delete();
-      } catch (_) {}
     }
+    _logger.e('Erro ao executar script consolidado: (saída vazia)');
+    return {};
   }
 
+  // MODIFICADO: Agora usa _runScript
   Future<List<String>> _getInstalledPrograms() async {
     _logger.i("--- Iniciando coleta de programas ---");
     try {
-      const command = 'powershell';
-      const script = r'Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object { $_.DisplayName -ne $null } | Select-Object DisplayName, DisplayVersion | ForEach-Object { "$($_.DisplayName) version $($_.DisplayVersion)" } | Sort-Object -Unique';
-      
-      final result = await _runCommand(command, ['-command', script]);
+      // MODIFICADO: Chama o _runScript
+      final result = await _runScript('get_installed_programs.ps1');
       if (result.isNotEmpty && !result.startsWith("Erro")) {
         final programs = result.split('\n').where((s) => s.trim().isNotEmpty).toList();
         _logger.i("✅ ${programs.length} programas encontrados");
@@ -217,20 +128,11 @@ $data | ConvertTo-Json -Depth 2
     return [];
   }
 
+  // MODIFICADO: Agora usa _runScript
   Future<Map<String, dynamic>> _getBatteryInfo() async {
-    // ... (IDÊNTICO AO ANTERIOR)
     try {
-      final result = await _runCommand('powershell', [
-        '-command',
-        r'''
-        $battery = Get-WmiObject Win32_Battery -ErrorAction SilentlyContinue
-        if ($battery) {
-          $level = $battery.EstimatedChargeRemaining
-          $health = if ($battery.BatteryStatus -eq 2) { "Carregando" } else { "OK" }
-          Write-Output "$level;$health"
-        }
-        '''
-      ]);
+      // MODIFICADO: Chama o _runScript
+      final result = await _runScript('get_battery_info.ps1');
       
       if (result.contains(';')) {
         final parts = result.split(';');
@@ -246,37 +148,12 @@ $data | ConvertTo-Json -Depth 2
     return {'battery_level': null, 'battery_health': 'N/A'};
   }
 
+  // MODIFICADO: Agora usa _runScript
   Future<Map<String, String>> _getPeripherals() async {
     _logger.i("--- Iniciando coleta de periféricos ---");
-    const String scriptContent = r'''
-$OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$zebraStatus = "Não detectado"; $bematechStatus = "Não detectado"; $biometricStatus = "Não detectado"
-try {
-    $allPrinters = Get-Printer -ErrorAction Stop
-    foreach ($printer in $allPrinters) {
-        if ($printer.Name -match "Zebra|ZDesigner|ZD") { $zebraStatus = "Conectado - $($printer.PrinterStatus)" }
-        if ($printer.Name -match "Bematech|MP-4200|MP4200") { $bematechStatus = "Conectado - $($printer.PrinterStatus)" }
-    }
-} catch {}
-try {
-    $biometricDevice = Get-PnpDevice -Class "Biometric" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($biometricDevice) { $biometricStatus = if ($biometricDevice.Status -eq "OK") { "Conectado" } else { "Detectado - $($biometricDevice.Status)" } }
-} catch {}
-Write-Output "ZEBRA:$zebraStatus"; Write-Output "BEMATECH:$bematechStatus"; Write-Output "BIOMETRIC:$biometricStatus"
-''';
-
-    final tempDir = Directory.systemTemp;
-    final scriptFile = File('${tempDir.path}\\monitor_peripherals.ps1');
-    
     try {
-      await scriptFile.writeAsString(scriptContent, flush: true, encoding: utf8);
-      final result = await Process.run(
-        'powershell',
-        ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', scriptFile.path],
-        runInShell: true,
-      );
-      final stdoutString = _decodeOutput(result.stdout);
+      // MODIFICADO: Chama o _runScript
+      final stdoutString = await _runScript('get_peripherals.ps1');
 
       Map<String, String> devices = {'zebra': 'Não detectado', 'bematech': 'Não detectado', 'biometric': 'Não detectado'};
       final lines = stdoutString.split('\n');
@@ -291,103 +168,35 @@ Write-Output "ZEBRA:$zebraStatus"; Write-Output "BEMATECH:$bematechStatus"; Writ
     } catch (e) {
       _logger.e("❌ Erro ao detectar periféricos: $e");
       return {'zebra': 'Erro', 'bematech': 'Erro', 'biometric': 'Erro'};
-    } finally {
-      try {
-        if (await scriptFile.exists()) await scriptFile.delete();
-      } catch (_) {}
     }
   }
 
   // ===================================================================
-  // ✅ SCRIPT DE COLETA DE IMPRESSORAS (Correção asset_name)
+  // ✅ SCRIPT DE COLETA DE IMPRESSORAS (Agora usa _runScript)
   // ===================================================================
   Future<List<Map<String, dynamic>>> _getPrintersInfo() async {
     _logger.i("--- Iniciando coleta de impressoras ---");
-    const String scriptContent = r'''
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$ErrorActionPreference = 'SilentlyContinue'
-$netInfo = Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias (Get-NetConnectionProfile).InterfaceAlias | Select-Object -First 1
-$hostName = $env:COMPUTERNAME
-$hostIp = $netInfo.IPAddress
-$printersList = @()
-$wmiPrinters = Get-CimInstance -ClassName Win32_Printer
-if ($wmiPrinters -eq $null) { Write-Output "[]"; return }
-
-foreach ($printer in $wmiPrinters) {
-    $portName = $printer.PortName; $port = Get-PrinterPort -Name $portName
-    $ip = $null; $usbPortName = $null; $connectionType = "unknown"
-    $name = $printer.Name; $serial = $printer.SerialNumber
-
-    if (-not $name -or $name.Trim() -eq "") {
-        if ($serial -and $serial.Trim() -ne "" -and $serial -notmatch "000000" -and $serial -notmatch "N/A") { $name = $serial.Trim() }
-        else { continue }
-    }
-    if (-not $serial -or $serial -match "000000" -or $serial -match "N/A" -or $serial.Trim() -eq "") {
-        $serial = "$hostName-$($name.Trim())" 
-    }
-
-    if ($port.PortType -eq "Usb") { $connectionType = "usb"; $usbPortName = $portName }
-    elseif ($port.PortType -eq "Tcp" -and $port.HostAddress) { $connectionType = "network"; $ip = $port.HostAddress }
-    elseif ($port.PortType -eq "Wsd" -or $port.PortType -eq "Tcp") { $connectionType = "usb"; $usbPortName = $portName }
-    elseif ($portName -match "LPT" -or $portName -match "COM") { $connectionType = "local" }
-    else { $connectionType = "virtual" }
-
-    $statusText = "unknown"
-    switch ($printer.PrinterStatus) {
-        3 { $statusText = "online" }; 4 { $statusText = "printing" }
-        5 { $statusText = "warming_up" }; 7 { $statusText = "offline" }
-        6 { $statusText = "stopped" }; 1, 2 { $statusText = "unknown" }
-    }
-
-    if ($connectionType -eq "usb" -or $connectionType -eq "network") {
-        $printerData = [PSCustomObject]@{
-            asset_name = $name.Trim(); serial_number = $serial.Trim()
-            model = $printer.DriverName; manufacturer = $printer.Manufacturer
-            printer_status = $statusText; connection_type = $connectionType
-            ip_address = $ip; usb_port = $usbPortName
-            host_computer_name = $hostName; host_computer_ip = $hostIp
-            driver_version = $printer.DriverVersion
-            total_page_count = $null; firmware_version = $null
-        }
-        $printersList += $printerData
-    }
-}
-$printersList | ConvertTo-Json -Depth 4
-''';
-
-    final tempDir = Directory.systemTemp;
-    final scriptFile = File('${tempDir.path}\\monitor_printers.ps1');
     
     try {
-      await scriptFile.writeAsString(scriptContent, flush: true, encoding: utf8);
-      final result = await Process.run(
-        'powershell',
-        ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', scriptFile.path],
-        runInShell: true,
-      );
-      final stdoutString = _decodeOutput(result.stdout);
-      final stderrString = _decodeOutput(result.stderr);
+      // MODIFICADO: Chama o _runScript
+      final stdoutString = await _runScript('get_printers_info.ps1');
 
-      if (result.exitCode == 0 && stdoutString.isNotEmpty && stdoutString.startsWith('[')) {
+      if (stdoutString.isNotEmpty && stdoutString.startsWith('[')) {
         final List<dynamic> decodedJson = json.decode(stdoutString);
         _logger.i('✅ ${decodedJson.length} impressoras físicas encontradas');
         return decodedJson.cast<Map<String, dynamic>>();
       } else {
-        _logger.e('Erro ao executar script de impressoras: $stderrString \n $stdoutString');
+        _logger.e('Erro ao executar script de impressoras: $stdoutString');
         return [];
       }
     } catch (e) {
       _logger.e("❌ Exceção ao executar script de impressoras: $e");
       return [];
-    } finally {
-      try {
-        if (await scriptFile.exists()) await scriptFile.delete();
-      } catch (_) {}
     }
   }
 
   // ===================================================================
-  // ✅ FUNÇÃO DE ENVIO DE PAYLOAD (Refatorada)
+  // ✅ FUNÇÃO DE ENVIO DE PAYLOAD (Sem alterações)
   // ===================================================================
   Future<void> _sendPayload(Map<String, dynamic> payload, String serverUrl, String moduleId) async {
     try {
@@ -460,6 +269,7 @@ $printersList | ConvertTo-Json -Depth 4
     required String token,
     String? manualSector,
     String? manualFloor,
+    String? manualAssetName, // <-- NOVO
   }) async {
     if (serverUrl.isEmpty || moduleId.isEmpty || token.isEmpty) {
       _logger.w('❌ Configurações incompletas. Abortando envio.');
@@ -494,6 +304,8 @@ $printersList | ConvertTo-Json -Depth 4
 
         for (final printerPayload in printers) {
           printerPayload['custom_data'] = { 'sector': manualSector, 'floor': manualFloor };
+          // NOTA: O asset_name manual NÃO está sendo aplicado a impressoras,
+          // elas usam a própria detecção. Isso parece ser o correto.
           if (!_moduleStructureService.validateData(printerPayload, 'printer')) {
               _logger.w('⚠️ Impressora [${printerPayload['serial_number']}] com campos obrigatórios ausentes. Pulando envio.');
               continue;
@@ -517,12 +329,16 @@ $printersList | ConvertTo-Json -Depth 4
           'custom_data': { 'sector': manualSector, 'floor': manualFloor }
       };
       
-      // ✅ ATUALIZADO: O 'asset_name' vem do script validado
       payload.addAll(coreInfo);
-      payload['assigned_to'] = await _runCommand('whoami', []); 
       
-      // O 'asset_name' é definido pelo coreInfo['hostname']
-      // O 'serial_number' é definido pelo coreInfo['serial_number']
+      // <-- LÓGICA DE SOBRESCRITA DO ASSET_NAME
+      if (manualAssetName != null && manualAssetName.isNotEmpty) {
+        _logger.i('Usando Nome do Ativo manual: $manualAssetName');
+        payload['asset_name'] = manualAssetName;
+      }
+      // FIM DA LÓGICA DE SOBRESCRITA
+      
+      payload['assigned_to'] = await _runCommand('whoami', []); 
 
       switch (moduleType) {
   case 'desktop':

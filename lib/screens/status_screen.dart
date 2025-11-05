@@ -274,7 +274,15 @@ class _StatusScreenState extends State<StatusScreen> {
                             const SizedBox(height: 8),
                             _buildInfoRow('Módulo:', moduleName),
                             const SizedBox(height: 8),
-                            // NOVO: Informações adicionais
+                            
+                            // <-- NOVO CAMPO ADICIONADO AQUI
+                            _buildInfoRow(
+                                'Nome do Ativo:',
+                                provider.assetNameController.text.isEmpty
+                                    ? 'Automático (Nome do PC)'
+                                    : provider.assetNameController.text),
+                            const SizedBox(height: 8),
+
                             _buildInfoRow(
                                 'Setor:',
                                 provider.sectorController.text.isEmpty

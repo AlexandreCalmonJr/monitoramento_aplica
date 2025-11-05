@@ -40,6 +40,7 @@ class AgentProvider extends ChangeNotifier {
   final tokenController = TextEditingController();
   final sectorController = TextEditingController();
   final floorController = TextEditingController();
+  final assetNameController = TextEditingController(); // <-- NOVO
 
   // Lista de Módulos
   List<ModuleInfo> _availableModules = [];
@@ -99,6 +100,7 @@ class AgentProvider extends ChangeNotifier {
     sectorController.text = _settingsService.sector;
     floorController.text = _settingsService.floor;
     tokenController.text = _settingsService.token;
+    assetNameController.text = _settingsService.assetName; // <-- NOVO
     _selectedInterval = _settingsService.interval;
     _selectedModuleId = _settingsService.moduleId;
 
@@ -233,6 +235,7 @@ class AgentProvider extends ChangeNotifier {
         newSector: sectorController.text,
         newFloor: floorController.text,
         newToken: tokenController.text,
+        newAssetName: assetNameController.text, // <-- NOVO
       );
 
       await _backgroundService.updateSettings({
@@ -242,6 +245,7 @@ class AgentProvider extends ChangeNotifier {
         'sector': sectorController.text,
         'floor': floorController.text,
         'token': tokenController.text,
+        'assetName': assetNameController.text, // <-- NOVO
       });
 
       _status = AgentStatus.configured;

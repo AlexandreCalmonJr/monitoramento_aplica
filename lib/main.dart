@@ -250,7 +250,7 @@ class HomeScreenRouter extends StatelessWidget {
         _ => const Scaffold(
             backgroundColor: Color(0xFF1A202C),
             body: Center(child: CircularProgressIndicator()),
-           ),
+          ),
       },
     );
   }

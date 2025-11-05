@@ -67,6 +67,7 @@ class BackgroundService {
       'sector': _settingsService.sector,
       'floor': _settingsService.floor,
       'token': _settingsService.token,
+      'assetName': _settingsService.assetName, // <-- NOVO
     };
 
     _isRunning = true;
@@ -92,6 +93,7 @@ class BackgroundService {
     final sector = _currentSettings!['sector'] as String?;
     final floor = _currentSettings!['floor'] as String?;
     final token = _currentSettings!['token'] as String?;
+    final assetName = _currentSettings!['assetName'] as String?; // <-- NOVO
 
     if (moduleId == null || moduleId.isEmpty || 
         serverUrl == null || serverUrl.isEmpty ||
@@ -112,6 +114,7 @@ class BackgroundService {
         manualSector: sector,
         manualFloor: floor,
         token: token,
+        manualAssetName: assetName, // <-- NOVO
       );
       
       _logger.i('✅ CICLO CONCLUÍDO COM SUCESSO');

@@ -12,6 +12,7 @@ class SettingsService {
   late String sector;
   late String floor;
   late String token;
+  late String assetName; // <-- NOVO
 
   SettingsService(this._logger) {
     _logger.i('SettingsService inicializado');
@@ -26,6 +27,7 @@ class SettingsService {
     sector = prefs.getString('manual_sector') ?? '';
     floor = prefs.getString('manual_floor') ?? '';
     token = prefs.getString('auth_token') ?? '';
+    assetName = prefs.getString('asset_name') ?? ''; // <-- NOVO
     _logger.d('Configurações carregadas');
   }
 
@@ -37,6 +39,7 @@ class SettingsService {
     required String newSector,
     required String newFloor,
     required String newToken,
+    required String newAssetName, // <-- NOVO
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('server_ip', newIp);
@@ -46,6 +49,7 @@ class SettingsService {
     await prefs.setString('manual_sector', newSector);
     await prefs.setString('manual_floor', newFloor);
     await prefs.setString('auth_token', newToken); 
+    await prefs.setString('asset_name', newAssetName); // <-- NOVO
     
     // Atualiza as variáveis locais
     ip = newIp;
@@ -55,6 +59,7 @@ class SettingsService {
     sector = newSector;
     floor = newFloor;
     token = newToken;
+    assetName = newAssetName; // <-- NOVO
     
     _logger.i('Configurações salvas: Módulo $newModuleId, Servidor $newIp:$newPort');
   }
