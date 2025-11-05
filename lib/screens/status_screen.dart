@@ -1,5 +1,6 @@
 // File: lib/screens/status_screen.dart
 import 'dart:async';
+import 'dart:io';
 
 import 'package:agent_windows/providers/agent_provider.dart';
 import 'package:agent_windows/services/background_service.dart';
@@ -38,7 +39,7 @@ class _StatusScreenState extends State<StatusScreen> {
     _timer?.cancel();
     super.dispose();
   }
-
+  
   String _formatDateTime(DateTime? dt) {
     if (dt == null) return "N/A";
     return DateFormat('dd/MM/yyyy HH:mm:ss').format(dt);
@@ -50,6 +51,94 @@ class _StatusScreenState extends State<StatusScreen> {
     if (diff.isNegative) return "Agora...";
     return "Em ${diff.inMinutes}m ${diff.inSeconds.remainder(60)}s";
   }
+  
+  void _showSystemInfo(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: const Color(0xFF1A202C),
+      title: const Row(
+        children: [
+          Icon(Icons.computer, color: Colors.blue),
+          SizedBox(width: 12),
+          Text('Informações do Sistema'),
+        ],
+      ),
+      content: SizedBox(
+        width: 500,
+        child: SingleChildScrollView(
+          child: FutureBuilder<Map<String, String>>(
+            future: _getSystemInfo(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24.0),
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+              
+              if (snapshot.hasError) {
+                return Text('Erro: ${snapshot.error}');
+              }
+              
+              final info = snapshot.data ?? {};
+              
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: info.entries.map((entry) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 140,
+                          child: Text(
+                            '${entry.key}:',
+                            style: TextStyle(
+                              color: Colors.grey[400],
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            entry.value,
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Fechar'),
+        ),
+      ],
+    ),
+  );
+}
+
+Future<Map<String, String>> _getSystemInfo() async {
+  return {
+    'Nome do Computador': Platform.environment['COMPUTERNAME'] ?? 'N/A',
+    'Usuário': Platform.environment['USERNAME'] ?? 'N/A',
+    'Sistema Operacional': Platform.operatingSystem,
+    'Versão do SO': Platform.operatingSystemVersion,
+    'Número de Processadores': Platform.numberOfProcessors.toString(),
+    'Arquitetura': Platform.version,
+  };
+}
 
   void _showLogs(BuildContext context) {
     showDialog(
@@ -79,173 +168,277 @@ class _StatusScreenState extends State<StatusScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final provider = context.watch<AgentProvider>();
-    final theme = Theme.of(context);
-    final moduleName = provider.selectedModule?.name ?? "N/A";
-    final serverUrl = 'http://${provider.ipController.text}:${provider.portController.text}';
+Widget build(BuildContext context) {
+  final provider = context.watch<AgentProvider>();
+  final theme = Theme.of(context);
+  final moduleName = provider.selectedModule?.name ?? "N/A";
+  final serverUrl = 'http://${provider.ipController.text}:${provider.portController.text}';
 
-    return Scaffold(
-      body: Center(
-        child: SizedBox(
-          width: 600,
-          child: Column(
-            children: [
-              // Cabeçalho
-              _buildHeader(theme, _backgroundService.isRunning),
-              
-              // Corpo
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _buildStatusCard(
-                        theme: theme,
-                        title: 'Status do Serviço',
-                        icon: Icons.sync,
-                        content: _buildServiceStatus(),
+  return Scaffold(
+    body: Center(
+      child: SizedBox(
+        width: 600,
+        child: Column(
+          children: [
+            _buildHeader(theme, _backgroundService.isRunning),
+            
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // NOVO: Card de Estatísticas
+                    _buildSyncStats(
+                      context, 
+                      _backgroundService
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    _buildStatusCard(
+                      theme: theme,
+                      title: 'Status do Serviço',
+                      icon: Icons.sync,
+                      content: _buildServiceStatus(),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildStatusCard(
+                      theme: theme,
+                      title: 'Configuração de Conexão',
+                      icon: Icons.dns_outlined,
+                      content: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildInfoRow('Servidor:', serverUrl),
+                          const SizedBox(height: 8),
+                          _buildInfoRow('Módulo:', moduleName),
+                          const SizedBox(height: 8),
+                          // NOVO: Informações adicionais
+                          _buildInfoRow('Setor:', provider.sectorController.text.isEmpty ? 'Não definido' : provider.sectorController.text),
+                          const SizedBox(height: 8),
+                          _buildInfoRow('Andar:', provider.floorController.text.isEmpty ? 'Não definido' : provider.floorController.text),
+                        ],
                       ),
-                      const SizedBox(height: 16),
-                      _buildStatusCard(
-                        theme: theme,
-                        title: 'Configuração de Conexão',
-                        icon: Icons.dns_outlined,
-                        content: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildInfoRow('Servidor:', serverUrl),
-                            const SizedBox(height: 8),
-                            _buildInfoRow('Módulo:', moduleName),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildStatusCard(
-                        theme: theme,
-                        title: 'Logs Recentes',
-                        icon: Icons.article_outlined,
-                        content: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              height: 150,
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.3),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: SingleChildScrollView(
-                                reverse: true,
-                                padding: const EdgeInsets.all(8),
-                                child: Text(
-                                  AppLogger.getRecentLogs(),
-                                  style: const TextStyle(
-                                    fontFamily: 'monospace',
-                                    fontSize: 9,
-                                    color: Colors.white70,
-                                  ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildStatusCard(
+                      theme: theme,
+                      title: 'Logs Recentes',
+                      icon: Icons.article_outlined,
+                      content: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            height: 150,
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: SingleChildScrollView(
+                              reverse: true,
+                              padding: const EdgeInsets.all(8),
+                              child: Text(
+                                AppLogger.getRecentLogs(),
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 9,
+                                  color: Colors.white70,
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 8),
-                            ElevatedButton.icon(
-                              onPressed: () => _showLogs(context),
-                              icon: const Icon(Icons.open_in_new, size: 16),
-                              label: const Text('Ver Logs Completos'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: theme.colorScheme.secondary,
-                                textStyle: const TextStyle(fontSize: 12),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _showLogs(context),
+                                  icon: const Icon(Icons.open_in_new, size: 16),
+                                  label: const Text('Ver Logs Completos'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: theme.colorScheme.secondary,
+                                    textStyle: const TextStyle(fontSize: 12),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)
+                                  ),
+                                ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 8),
+                              // NOVO: Botão para limpar logs
+                              ElevatedButton.icon(
+                                onPressed: () {
+                                  AppLogger.logHistory.clear();
+                                  setState(() {});
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Logs limpos')),
+                                  );
+                                },
+                                icon: const Icon(Icons.delete_outline, size: 16),
+                                label: const Text('Limpar'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red.withOpacity(0.8),
+                                  textStyle: const TextStyle(fontSize: 12),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8)
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Rodapé com Ações MELHORADO
+            Container(
+              padding: const EdgeInsets.all(24.0),
+              decoration: BoxDecoration(
+                color: theme.cardColor,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 8,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // PRIMEIRA LINHA DE BOTÕES
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            _logger.i('Sincronização forçada pelo usuário');
+                            _backgroundService.runCycle();
+                            setState(() {});
+                          },
+                          icon: const Icon(Icons.sync_outlined, size: 20),
+                          label: const Text('Forçar Sincronização'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _backgroundService.isRunning
+                              ? () {
+                                  _backgroundService.stop();
+                                  setState(() {});
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Serviço pausado')),
+                                  );
+                                }
+                              : () {
+                                  _backgroundService.start();
+                                  setState(() {});
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Serviço retomado')),
+                                  );
+                                },
+                          icon: Icon(
+                            _backgroundService.isRunning ? Icons.pause : Icons.play_arrow,
+                            size: 20,
+                          ),
+                          label: Text(_backgroundService.isRunning ? 'Pausar' : 'Retomar'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _backgroundService.isRunning 
+                                ? Colors.orange 
+                                : Colors.green,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ),
-
-              // Rodapé com Ações
-              Container(
-                padding: const EdgeInsets.all(24.0),
-                decoration: BoxDecoration(
-                  color: theme.cardColor,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 8,
-                      offset: const Offset(0, -2),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          _logger.i('Sincronização forçada pelo usuário');
-                          _backgroundService.runCycle();
-                          setState(() {});
-                        },
-                        icon: const Icon(Icons.sync_outlined, size: 20),
-                        label: const Text('Forçar Sincronização'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.secondary,
+                  const SizedBox(height: 12),
+                  // SEGUNDA LINHA DE BOTÕES
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _showSystemInfo(context), // NOVO: Você vai criar esse método
+                          icon: const Icon(Icons.info_outline, size: 18),
+                          label: const Text('Info do Sistema'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.blue,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () => context.read<AgentProvider>().enterReconfiguration(),
-                        icon: const Icon(Icons.settings_outlined, size: 20),
-                        label: const Text('Reconfigurar'),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () => context.read<AgentProvider>().enterReconfiguration(),
+                          icon: const Icon(Icons.settings_outlined, size: 20),
+                          label: const Text('Reconfigurar'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: theme.colorScheme.secondary,
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildServiceStatus() {
-    final statusColor = _backgroundService.isRunning ? Colors.green : Colors.grey;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(
-              _backgroundService.isRunning ? Icons.check_circle : Icons.pause_circle,
-              size: 18,
-              color: statusColor,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              _backgroundService.isRunning ? 'Ativo' : 'Parado',
-              style: TextStyle(
-                color: statusColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
         ),
-        const Divider(height: 24),
-        _buildInfoRow('Última Sincronização:', _formatDateTime(_backgroundService.lastRunTime)),
-        const SizedBox(height: 8),
-        _buildInfoRow('Status:', _backgroundService.lastRunStatus),
-        const SizedBox(height: 8),
-        _buildInfoRow('Próxima Sincronização:', _formatNextRun(_backgroundService.nextRunTime)),
-      ],
-    );
+      ),
+    ),
+  );
+}
+
+  Widget _buildServiceStatus() {
+  final statusColor = _backgroundService.isRunning ? Colors.green : Colors.grey;
+  final provider = context.watch<AgentProvider>(); // ADICIONE
+
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      // Status Principal
+      Row(
+        children: [
+          Icon(
+            _backgroundService.isRunning ? Icons.check_circle : Icons.pause_circle,
+            size: 18,
+            color: statusColor,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _backgroundService.isRunning ? 'Ativo' : 'Parado',
+            style: TextStyle(
+              color: statusColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
+          ),
+          const Spacer(),
+          // NOVO: Indicador de progresso quando sincronizando
+          if (_backgroundService.lastRunStatus == "Sincronizando...")
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+        ],
+      ),
+      const Divider(height: 24),
+      
+      // Informações detalhadas
+      _buildInfoRow('Última Sincronização:', _formatDateTime(_backgroundService.lastRunTime)),
+      const SizedBox(height: 8),
+      _buildInfoRow('Status:', _backgroundService.lastRunStatus),
+      const SizedBox(height: 8),
+      _buildInfoRow('Próxima Sincronização:', _formatNextRun(_backgroundService.nextRunTime)),
+      const SizedBox(height: 8),
+      _buildInfoRow('Intervalo:', '${provider.selectedInterval ~/ 60} minutos'), // NOVO
+    ],
+  );
+}
   }
 
   Widget _buildInfoRow(String label, String value) {
@@ -381,4 +574,87 @@ class _StatusScreenState extends State<StatusScreen> {
       ),
     );
   }
+
+Widget _buildSyncStats(BuildContext context, BackgroundService backgroundService) {
+  final theme = Theme.of(context);
+  return Row(
+    children: [
+      Expanded(
+        child: _buildStatCard(
+          theme: theme,
+          icon: Icons.check_circle_outline,
+          label: 'Sincronizações',
+          value: '${backgroundService.syncCount ?? 0}', // Você vai adicionar isso no BackgroundService
+          color: Colors.green,
+        ),
+      ),
+      const SizedBox(width: 12),
+      Expanded(
+        child: _buildStatCard(
+          theme: theme,
+          icon: Icons.error_outline,
+          label: 'Erros',
+          value: '${backgroundService.errorCount ?? 0}', // Você vai adicionar isso no BackgroundService
+          color: Colors.red,
+        ),
+      ),
+      const SizedBox(width: 12),
+      Expanded(
+        child: _buildStatCard(
+          theme: theme,
+          icon: Icons.schedule,
+          label: 'Uptime',
+          value: _formatUptime(backgroundService.startTime), // Você vai adicionar isso no BackgroundService
+          color: Colors.blue,
+        ),
+      ),
+    ],
+  );
+}
+
+Widget _buildStatCard({
+  required ThemeData theme,
+  required IconData icon,
+  required String label,
+  required String value,
+  required Color color,
+}) {
+  return Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: color.withOpacity(0.3)),
+    ),
+    child: Column(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[400],
+            fontSize: 11,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+String _formatUptime(DateTime? startTime) {
+  if (startTime == null) return "N/A";
+  final duration = DateTime.now().difference(startTime);
+  final hours = duration.inHours;
+  final minutes = duration.inMinutes.remainder(60);
+  return "${hours}h ${minutes}m";
 }

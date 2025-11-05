@@ -18,6 +18,10 @@ class BackgroundService {
   String lastRunStatus = "Aguardando";
   DateTime? lastRunTime;
   DateTime? nextRunTime;
+  
+  int syncCount = 0;
+  int errorCount = 0;
+  DateTime? startTime;
 
   // Construtor com DI
   BackgroundService(this._logger, this._settingsService, this._monitoringService) {
@@ -66,32 +70,16 @@ class BackgroundService {
     };
 
     _isRunning = true;
+    startTime = DateTime.now(); // NOVO
     _logger.i('✅ Background Service: Iniciado');
     _logger.i('   Módulo: ${_settingsService.moduleId}');
     _logger.i('   Servidor: ${_currentSettings!['serverUrl']}');
     _logger.i('   Intervalo: ${_settingsService.interval}s');
     
-    // Executa imediatamente
     await runCycle();
     
-    // Agenda execuções periódicas
-    _scheduleNextRun();
   }
 
-  void _scheduleNextRun() {
-    _timer?.cancel();
-    
-    final interval = _currentSettings?['interval'] as int? ?? 300;
-    nextRunTime = DateTime.now().add(Duration(seconds: interval));
-    _logger.i('⏰ Próxima execução em ${interval}s (${Duration(seconds: interval).inMinutes} minutos)');
-    
-    _timer = Timer(Duration(seconds: interval), () async {
-      await runCycle();
-      _scheduleNextRun();
-    });
-  }
-
-  // Renomeado para public (para o botão "Forçar Sincronização")
   Future<void> runCycle() async {
     if (_currentSettings == null) {
       _logger.w('⚠️  Background Service: Configurações ausentes');
@@ -110,6 +98,7 @@ class BackgroundService {
         token == null || token.isEmpty) {
       _logger.e('❌ Background Service: Configurações incompletas para executar ciclo');
       lastRunStatus = "Erro: Config incompleta";
+      errorCount++; // NOVO
       return;
     }
 
@@ -127,9 +116,11 @@ class BackgroundService {
       
       _logger.i('✅ CICLO CONCLUÍDO COM SUCESSO');
       lastRunStatus = "Sucesso";
+      syncCount++; // NOVO
     } catch (e, stackTrace) {
       _logger.e('❌ ERRO NO CICLO DE MONITORAMENTO', error: e, stackTrace: stackTrace);
       lastRunStatus = "Erro: ${e.toString().substring(0, (e.toString().length < 50) ? e.toString().length : 50)}...";
+      errorCount++; // NOVO
     }
     
     lastRunTime = DateTime.now();
@@ -142,7 +133,7 @@ class BackgroundService {
     
     // Cancela o timer atual e reagenda
     _timer?.cancel();
-    _scheduleNextRun();
+    
     
     // Executa imediatamente com as novas configurações
     _logger.i('⚡ Executando ciclo imediato com novas configurações...');
@@ -161,4 +152,12 @@ class BackgroundService {
   void dispose() {
     stop();
   }
+  
+  void resetCounters() {
+    syncCount = 0;
+    errorCount = 0;
+    startTime = DateTime.now();
+    _logger.i('🔄 Contadores resetados');
+  }
+
 }
