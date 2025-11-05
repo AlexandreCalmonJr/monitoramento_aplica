@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:agent_windows/models/module_info.dart';
 import 'package:agent_windows/services/auth_service.dart';
 import 'package:agent_windows/services/background_service.dart';
-import 'package:agent_windows/services/module_structure_service.dart';
 import 'package:agent_windows/services/service_locator.dart';
 import 'package:agent_windows/services/settings_service.dart';
 import 'package:flutter/material.dart';
@@ -19,10 +18,15 @@ class AgentProvider extends ChangeNotifier {
   final SettingsService _settingsService;
   final AuthService _authService;
   final BackgroundService _backgroundService;
-  final ModuleStructureService _moduleStructureService;
-
   AgentStatus _status = AgentStatus.unconfigured;
   AgentStatus get status => _status;
+
+
+  Future<void> restartService() async {
+    _logger.i('Reiniciando o serviço...');
+    await _backgroundService.initialize();
+    notifyListeners();
+  }
 
   ModuleFetchStatus _moduleFetchStatus = ModuleFetchStatus.idle;
   ModuleFetchStatus get moduleFetchStatus => _moduleFetchStatus;
@@ -40,7 +44,8 @@ class AgentProvider extends ChangeNotifier {
   // Lista de Módulos
   List<ModuleInfo> _availableModules = [];
   List<ModuleInfo> get availableModules => _availableModules;
-
+  String _searchQuery = '';
+  String get searchQuery => _searchQuery;
   String? _selectedModuleId;
   String? get selectedModuleId => _selectedModuleId;
   ModuleInfo? get selectedModule {
@@ -50,7 +55,18 @@ class AgentProvider extends ChangeNotifier {
       return null;
     }
   }
-
+  List<ModuleInfo> get filteredModules {
+    if (_searchQuery.isEmpty) {
+      return _availableModules;
+    }
+    
+    final query = _searchQuery.toLowerCase();
+    return _availableModules.where((module) {
+      return module.name.toLowerCase().contains(query) ||
+              module.type.toLowerCase().contains(query) ||
+              module.description.toLowerCase().contains(query);
+    }).toList();
+  }
   String _errorMessage = '';
   String get errorMessage => _errorMessage;
 
@@ -68,8 +84,7 @@ class AgentProvider extends ChangeNotifier {
       : _logger = locator<Logger>(),
         _settingsService = locator<SettingsService>(),
         _authService = locator<AuthService>(),
-        _backgroundService = locator<BackgroundService>(),
-        _moduleStructureService = locator<ModuleStructureService>() {
+        _backgroundService = locator<BackgroundService>() {
     _logger.i('AgentProvider inicializado');
     _selectedInterval = intervalOptions.first['value'];
     _loadSettings();
@@ -113,6 +128,16 @@ class AgentProvider extends ChangeNotifier {
       _selectedInterval = interval;
       notifyListeners();
     }
+  }
+  
+  void updateSearchQuery(String query) {
+    _searchQuery = query;
+    notifyListeners();
+  }
+  
+  void clearSearch() {
+    _searchQuery = '';
+    notifyListeners();
   }
 
   Future<bool> fetchModules({bool testConnectionOnly = false}) async {

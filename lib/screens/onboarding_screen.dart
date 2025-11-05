@@ -185,23 +185,75 @@ class _OnboardingStep2 extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<AgentProvider>();
-    final modules = provider.availableModules;
+    final modules = provider.filteredModules; // MUDANÇA AQUI
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: _buildSectionHeader(
-            icon: Icons.extension_outlined,
-            title: 'Passo 2: Seleção do Módulo',
-            subtitle: 'Selecione o tipo de ativo que esta máquina representa',
+          child: Column(
+            children: [
+              _buildSectionHeader(
+                icon: Icons.extension_outlined,
+                title: 'Passo 2: Seleção do Módulo',
+                subtitle: 'Selecione o tipo de ativo que esta máquina representa',
+              ),
+              
+              // NOVO: Campo de busca
+              const SizedBox(height: 16),
+              TextField(
+                onChanged: (value) => provider.updateSearchQuery(value),
+                decoration: InputDecoration(
+                  labelText: 'Buscar módulo',
+                  hintText: 'Digite o nome ou tipo do módulo',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: provider.searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () => provider.clearSearch(),
+                        )
+                      : null,
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 24),
+        
+        const SizedBox(height: 16),
+        
+        // MELHORADO: Mensagem quando não há resultados
         Expanded(
           child: modules.isEmpty
-              ? const Center(child: Text('Nenhum módulo encontrado.'))
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        provider.searchQuery.isEmpty 
+                            ? Icons.inbox_outlined 
+                            : Icons.search_off,
+                        size: 64,
+                        color: Colors.grey[600],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        provider.searchQuery.isEmpty
+                            ? 'Nenhum módulo encontrado no servidor.'
+                            : 'Nenhum módulo corresponde à busca.',
+                        style: TextStyle(color: Colors.grey[400]),
+                      ),
+                      if (provider.searchQuery.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: () => provider.clearSearch(),
+                          icon: const Icon(Icons.clear),
+                          label: const Text('Limpar busca'),
+                        ),
+                      ],
+                    ],
+                  ),
+                )
               : ListView.separated(
                   padding: const EdgeInsets.symmetric(horizontal: 24.0),
                   itemCount: modules.length,
@@ -217,13 +269,32 @@ class _OnboardingStep2 extends StatelessWidget {
                 ),
         ),
         
+        // Contador de resultados (NOVO)
+        if (modules.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 8.0),
+            child: Text(
+              provider.searchQuery.isEmpty
+                  ? '${modules.length} módulos disponíveis'
+                  : '${modules.length} resultado(s) encontrado(s)',
+              style: TextStyle(
+                color: Colors.grey[400],
+                fontSize: 12,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        
         // Navegação
         Padding(
           padding: const EdgeInsets.all(24.0),
           child: Row(
             children: [
               TextButton(
-                onPressed: () => provider.previousOnboardingPage(),
+                onPressed: () {
+                  provider.clearSearch(); // ADICIONADO
+                  provider.previousOnboardingPage();
+                },
                 child: const Text('Voltar'),
               ),
               const Spacer(),

@@ -81,30 +81,44 @@ Future<void> main() async {
 Future<bool> initSystemTray() async {
   final SystemTray systemTray = SystemTray();
   String iconPath = '';
-  final logger = locator<Logger>(); // Obtém logger do locator
+  final logger = locator<Logger>();
 
   try {
     if (kDebugMode) {
+      // Debug: usa o path relativo do projeto
       iconPath = 'assets/app_icon.ico';
       logger.d('Modo Debug: Usando path do ícone: $iconPath');
     } else {
+      // Release: CORRIGIDO - múltiplas tentativas de localização
       final exeDir = File(Platform.resolvedExecutable).parent.path;
-      iconPath = '$exeDir/data/flutter_assets/assets/app_icon.ico';
-      logger.d('Modo Release: Usando path do ícone: $iconPath');
+      
+      // Tenta vários caminhos possíveis
+      final possiblePaths = [
+        '$exeDir/data/flutter_assets/assets/app_icon.ico',
+        '$exeDir/assets/app_icon.ico',
+        '$exeDir/app_icon.ico',
+      ];
+      
+      for (final path in possiblePaths) {
+        if (await File(path).exists()) {
+          iconPath = path;
+          logger.d('Ícone encontrado em: $iconPath');
+          break;
+        }
+      }
+      
+      if (iconPath.isEmpty) {
+        logger.e('Ícone não encontrado em nenhum dos caminhos testados');
+        return false;
+      }
     }
     
-    final iconFile = File(iconPath);
-    if (!await iconFile.exists()) {
-      logger.e('Ícone não encontrado em $iconPath');
-      return false;
-    }
-
     await systemTray.initSystemTray(
       title: "Agente de Monitoramento",
       iconPath: iconPath,
+      toolTip: "Agente de Monitoramento - Clique para abrir", // ADICIONADO
     );
 
-    // === NOVO MENU (Sugestão UX 3) ===
     final Menu menu = Menu();
     await menu.buildFrom([
       MenuItemLabel(
@@ -115,34 +129,32 @@ Future<bool> initSystemTray() async {
         label: 'Forçar Sincronização',
         onClicked: (menuItem) async {
           logger.i('Sincronização forçada pelo usuário');
-          // TODO: Implementar notificação na bandeja (displayMessage não existe no system_tray)
-          // systemTray.displayMessage(
-          //   "Agente de Monitoramento",
-          //   "Iniciando sincronização forçada...",
-          // );
           await locator<BackgroundService>().runCycle();
-          // systemTray.displayMessage(
-          //   "Agente de Monitoramento",
-          //   "Sincronização concluída.",
-          // );
         }
       ),
       MenuSeparator(),
       MenuItemLabel(
-        label: 'Fechar Agente', 
-        onClicked: (menuItem) {
+        label: 'Sair', // RENOMEADO de "Fechar Agente"
+        onClicked: (menuItem) async {
           locator<BackgroundService>().stop();
-          exit(0);
+          await windowManager.destroy(); // MELHOR que exit(0)
+        }
+      ),
+      MenuItemLabel(
+        label: 'Reiniciar',
+        onClicked: (menuItem) async {
+          logger.i('Reiniciando o serviço');
+          await locator<BackgroundService>().initialize();
         }
       ),
     ]);
-    // ===================================
 
     await systemTray.setContextMenu(menu);
 
     systemTray.registerSystemTrayEventHandler((eventName) {
       if (eventName == kSystemTrayEventClick) {
         windowManager.show();
+        windowManager.focus(); // ADICIONADO - traz janela para frente
       } else if (eventName == kSystemTrayEventRightClick) {
         systemTray.popUpContextMenu();
       }
@@ -151,8 +163,8 @@ Future<bool> initSystemTray() async {
     logger.i("Bandeja do sistema inicializada com sucesso.");
     return true;
 
-  } catch (e) {
-    logger.e('Erro ao inicializar bandeja do sistema: $e');
+  } catch (e, stackTrace) {
+    logger.e('Erro ao inicializar bandeja do sistema: $e', stackTrace: stackTrace);
     return false;
   }
 }
