@@ -49,7 +49,7 @@ class MonitoringService {
   // ✅ ATUALIZADO: SCRIPT DE COLETA DO HOST (Correção asset_name/hostname)
   // ===================================================================
   Future<Map<String, dynamic>> _getCoreSystemInfo() async {
-    const String scriptContent = r'''
+  const String scriptContent = r'''
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'SilentlyContinue'
@@ -61,48 +61,89 @@ $bios = Get-CimInstance -ClassName Win32_BIOS | Select-Object SerialNumber
 $cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1 | Select-Object Name
 $volC = Get-Volume -DriveLetter C
 $disk = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq 0 } | Select-Object -First 1
-$net = Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias (Get-NetConnectionProfile).InterfaceAlias | Select-Object -First 1
-$mac = if ($net) { (Get-NetAdapter -InterfaceIndex $net.InterfaceIndex).MacAddress } else { $null }
+
+# MELHORADO: Detecção de rede (prioriza WiFi se disponível)
+$wifiAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and ($_.InterfaceDescription -match "Wi-Fi|Wireless|802.11") } | Select-Object -First 1
+$ethernetAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and $_.InterfaceDescription -notmatch "Wi-Fi|Wireless|802.11|Virtual|Hyper-V" } | Select-Object -First 1
+
+# Prioriza WiFi, depois Ethernet
+$activeAdapter = if ($wifiAdapter) { $wifiAdapter } else { $ethernetAdapter }
+$net = if ($activeAdapter) { Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $activeAdapter.InterfaceIndex | Select-Object -First 1 } else { $null }
+$mac = if ($activeAdapter) { $activeAdapter.MacAddress } else { $null }
+
 $av = Get-MpComputerStatus | Select-Object AntivirusEnabled, AMProductVersion
 $bitlocker = Get-BitLockerVolume -MountPoint C: | Select-Object -ExpandProperty ProtectionStatus
+
+# MELHORADO: Coleta BSSID (múltiplos métodos)
 $bssid = $null
+$ssid = $null
+$signalQuality = $null
+
+# Método 1: netsh wlan (mais confiável)
 try {
-    $wifiProfile = (netsh wlan show interfaces) | Select-String "BSSID"
-    if ($wifiProfile) { $bssid = ($wifiProfile -split ":")[1].Trim() }
+    $wlanInfo = netsh wlan show interfaces | Select-String "BSSID", "SSID", "Signal"
+    foreach ($line in $wlanInfo) {
+        $lineStr = $line.ToString().Trim()
+        if ($lineStr -match "BSSID\s+:\s+(.+)") { $bssid = $Matches[1].Trim() }
+        if ($lineStr -match "SSID\s+:\s+(.+)" -and $lineStr -notmatch "BSSID") { $ssid = $Matches[1].Trim() }
+        if ($lineStr -match "Signal\s+:\s+(\d+)%") { $signalQuality = $Matches[1].Trim() + "%" }
+    }
 } catch {}
+
+# Método 2: WMI (fallback)
+if (-not $bssid -and $wifiAdapter) {
+    try {
+        $wifiConfig = netsh wlan show interfaces | Out-String
+        if ($wifiConfig -match "BSSID\s+:\s+([0-9A-Fa-f:]{17})") {
+            $bssid = $Matches[1]
+        }
+    } catch {}
+}
+
+# NOVO: Detecta se é Notebook
+$isNotebook = $false
+$chassisTypes = @(8, 9, 10, 11, 14, 18, 21, 31, 32) # Tipos de chassis que indicam notebook
+$chassis = (Get-CimInstance -ClassName Win32_SystemEnclosure).ChassisTypes
+foreach ($type in $chassis) {
+    if ($chassisTypes -contains $type) {
+        $isNotebook = $true
+        break
+    }
+}
+
+# Java e Browser
 function Get-RegValue { param($path, $name) (Get-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue).$name }
 $javaVersion = Get-RegValue -path "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment" -name "CurrentVersion"
 if ($javaVersion) { $javaVersionPath = "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment\$javaVersion"; $javaVersion = Get-RegValue -path $javaVersionPath -name "JavaVersion" }
 $chromeVersion = (Get-RegValue -path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" -name "(default)" | Get-Item -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
 
-# --- ✅ INÍCIO DA CORREÇÃO (Hostname/Asset_name) ---
+# Validação de Hostname e Serial
 $hostname = $env:COMPUTERNAME
 $serial = $bios.SerialNumber
 
-# 1. Validar Hostname
 if (-not $hostname -or $hostname.Trim() -eq "") {
-    # Se hostname é inválido, usa o Serial como Hostname
     $hostname = $serial
 }
 
-# 2. Validar Serial (caso o hostname também fosse inválido)
 if (-not $serial -or $serial.Trim() -eq "" -or $serial -match "000000" -or $serial -match "N/A") {
-    # Se serial também é inválido, usa o hostname (que pode ser o serial, mas garante que não seja "N/A")
     $serial = $hostname
 }
 
-# 3. Fallback final (se ambos falharem, o que é quase impossível)
 if (-not $hostname -or $hostname.Trim() -eq "") {
     $hostname = "HostDesconhecido"
 }
 if (-not $serial -or $serial.Trim() -eq "") {
-    $serial = $hostname # Garante que serial e hostname sejam iguais se tudo falhar
+    $serial = $hostname
 }
-# --- ✅ FIM DA CORREÇÃO ---
+
+# NOVO: Determina o tipo de conexão
+$connectionType = if ($wifiAdapter -and $wifiAdapter.Status -eq "Up") { "WiFi" } 
+                  elseif ($ethernetAdapter) { "Ethernet" } 
+                  else { "Desconhecido" }
 
 $data = [PSCustomObject]@{
-    hostname           = $hostname.Trim() # <-- Usa a variável validada
-    serial_number      = $serial.Trim()    # <-- Usa a variável validada
+    hostname           = $hostname.Trim()
+    serial_number      = $serial.Trim()
     model              = $cs.Model
     manufacturer       = $cs.Manufacturer
     processor          = $cpu.Name
@@ -114,6 +155,10 @@ $data = [PSCustomObject]@{
     ip_address         = $net.IPAddress
     mac_address        = $mac
     mac_address_radio  = $bssid
+    wifi_ssid          = $ssid
+    wifi_signal        = $signalQuality
+    connection_type    = $connectionType
+    is_notebook        = $isNotebook
     antivirus_status   = $av.AntivirusEnabled
     antivirus_version  = $av.AMProductVersion
     is_encrypted       = if ($bitlocker -eq "On") { $true } else { $false }
@@ -155,7 +200,6 @@ $data | ConvertTo-Json -Depth 2
   }
 
   Future<List<String>> _getInstalledPrograms() async {
-    // ... (IDÊNTICO AO ANTERIOR)
     _logger.i("--- Iniciando coleta de programas ---");
     try {
       const command = 'powershell';
@@ -203,7 +247,6 @@ $data | ConvertTo-Json -Depth 2
   }
 
   Future<Map<String, String>> _getPeripherals() async {
-    // ... (IDÊNTICO AO ANTERIOR)
     _logger.i("--- Iniciando coleta de periféricos ---");
     const String scriptContent = r'''
 $OutputEncoding = [System.Text.Encoding]::UTF8
@@ -452,8 +495,8 @@ $printersList | ConvertTo-Json -Depth 4
         for (final printerPayload in printers) {
           printerPayload['custom_data'] = { 'sector': manualSector, 'floor': manualFloor };
           if (!_moduleStructureService.validateData(printerPayload, 'printer')) {
-             _logger.w('⚠️ Impressora [${printerPayload['serial_number']}] com campos obrigatórios ausentes. Pulando envio.');
-             continue;
+              _logger.w('⚠️ Impressora [${printerPayload['serial_number']}] com campos obrigatórios ausentes. Pulando envio.');
+              continue;
           }
           await _sendPayload(printerPayload, serverUrl, moduleId);
         }
@@ -482,36 +525,47 @@ $printersList | ConvertTo-Json -Depth 4
       // O 'serial_number' é definido pelo coreInfo['serial_number']
 
       switch (moduleType) {
-        case 'desktop':
-          _logger.i('💻 Coletando dados específicos de Desktop...');
-          payload['installed_software'] = await _getInstalledPrograms();
-          final peripherals = await _getPeripherals();
-          payload['biometric_reader'] = peripherals['biometric'];
-          payload['connected_printer'] = '${peripherals['zebra']} / ${peripherals['bematech']}';
-          break;
+  case 'desktop':
+    _logger.i('💻 Coletando dados específicos de Desktop...');
+    payload['installed_software'] = await _getInstalledPrograms();
+    final peripherals = await _getPeripherals();
+    payload['biometric_reader'] = peripherals['biometric'];
+    payload['connected_printer'] = '${peripherals['zebra']} / ${peripherals['bematech']}';
+    break;
 
-        case 'notebook':
-          _logger.i('💼 Coletando dados específicos de Notebook...');
-          payload['installed_software'] = await _getInstalledPrograms();
-          final batteryInfo = await _getBatteryInfo();
-          
-          // ✅ CORREÇÃO NOTEBOOK
-          if (batteryInfo['battery_level'] != null) {
-            payload['battery_level'] = batteryInfo['battery_level'];
-          }
-          payload['battery_health'] = batteryInfo['battery_health'];
-          break;
-
-        case 'panel':
-          _logger.i('📺 Coletando dados de Panel...');
-          payload.addAll({
-            'is_online': true, 'screen_size': 'N/A',
-            'resolution': 'N/A', 'firmware_version': 'N/A',
-          });
-          break;
-        default:
-          _logger.i('📦 Módulo customizado ou não mapeado: enviando apenas dados base');
+  case 'notebook':
+    _logger.i('💼 Coletando dados específicos de Notebook...');
+    payload['installed_software'] = await _getInstalledPrograms();
+    final batteryInfo = await _getBatteryInfo();
+    
+    if (batteryInfo['battery_level'] != null) {
+      payload['battery_level'] = batteryInfo['battery_level'];
+    }
+    payload['battery_health'] = batteryInfo['battery_health'];
+    
+    // NOVO: Adiciona informações de WiFi se disponíveis
+    if (coreInfo['connection_type'] == 'WiFi') {
+      if (coreInfo['wifi_ssid'] != null) {
+        payload['wifi_ssid'] = coreInfo['wifi_ssid'];
       }
+      if (coreInfo['wifi_signal'] != null) {
+        payload['wifi_signal'] = coreInfo['wifi_signal'];
+      }
+      _logger.d('📶 WiFi detectado: SSID=${coreInfo['wifi_ssid']}, BSSID=${coreInfo['mac_address_radio']}, Sinal=${coreInfo['wifi_signal']}');
+    }
+    break;
+
+  case 'panel':
+    _logger.i('📺 Coletando dados de Panel...');
+    payload.addAll({
+      'is_online': true, 'screen_size': 'N/A',
+      'resolution': 'N/A', 'firmware_version': 'N/A',
+    });
+    break;
+    
+  default:
+    _logger.i('📦 Módulo customizado ou não mapeado: enviando apenas dados base');
+}
 
       if (!_moduleStructureService.validateData(payload, structure.type)) {
         _logger.w('⚠️  Alguns campos obrigatórios estão ausentes');
