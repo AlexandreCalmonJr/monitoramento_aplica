@@ -1,6 +1,7 @@
 // File: lib/services/service_locator.dart
 import 'package:agent_windows/services/auth_service.dart';
 import 'package:agent_windows/services/background_service.dart';
+import 'package:agent_windows/services/local_cache_service.dart';
 import 'package:agent_windows/services/module_structure_service.dart';
 import 'package:agent_windows/services/monitoring_service.dart';
 import 'package:agent_windows/services/settings_service.dart';
@@ -18,6 +19,6 @@ void setupLocator() {
   locator.registerLazySingleton(() => AuthService());
   locator.registerLazySingleton(() => SettingsService(locator<Logger>()));
   locator.registerLazySingleton(() => ModuleStructureService(locator<Logger>(), locator<AuthService>(), authService: locator<AuthService>()));
-  locator.registerLazySingleton(() => MonitoringService(locator<Logger>(), locator<AuthService>(), locator<ModuleStructureService>()));
+  locator.registerLazySingleton(() => MonitoringService(locator<Logger>(), locator<AuthService>(), locator<ModuleStructureService>(), locator<SettingsService>() as LocalCacheService));
   locator.registerLazySingleton(() => BackgroundService(locator<Logger>(), locator<SettingsService>(), locator<MonitoringService>()));
 }

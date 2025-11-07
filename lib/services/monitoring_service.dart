@@ -3,9 +3,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math'; // NOVO: Para pow() e min()
 
 import 'package:agent_windows/services/auth_service.dart';
+// NOVOS: Serviços de cache e validação
+import 'package:agent_windows/services/local_cache_service.dart';
 import 'package:agent_windows/services/module_structure_service.dart';
+import 'package:agent_windows/services/payload_validator.dart';
 import 'package:flutter/services.dart' show rootBundle; // NOVO: Import para assets
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
@@ -15,8 +19,12 @@ class MonitoringService {
   final Logger _logger;
   final AuthService _authService;
   final ModuleStructureService _moduleStructureService;
+  final LocalCacheService _cacheService; // NOVO: Injeção do CacheService
+  int _consecutiveErrors = 0;
+  final int _maxConsecutiveErrors = 3;
 
-  MonitoringService(this._logger, this._authService, this._moduleStructureService) {
+  // MODIFICADO: Construtor agora aceita CacheService
+  MonitoringService(this._logger, this._authService, this._moduleStructureService, this._cacheService) {
     _logger.i('MonitoringService inicializado');
   }
   
@@ -101,15 +109,45 @@ class MonitoringService {
       try {
         final decodedJson = json.decode(stdoutString);
         _logger.i('✅ Informações do sistema coletadas via script consolidado');
+        if (decodedJson['mac_address_radio'] == null || 
+          decodedJson['mac_address_radio'] == 'N/A' ||
+          decodedJson['mac_address_radio'].toString().isEmpty) {
+        _logger.w('⚠️ BSSID não detectado no script. Tentando coletar manualmente...');
+        decodedJson['mac_address_radio'] = await _getBssidManually();
+      }
+        _logger.i('Dados coletados: $decodedJson');
         return decodedJson;
       } catch (e) {
-         _logger.e('Erro ao decodificar JSON do get_core_system_info.ps1: $e');
-         return {};
+        _logger.e('Erro ao decodificar JSON do get_core_system_info.ps1: $e');
+        return {};
       }
     }
     _logger.e('Erro ao executar script consolidado: (saída vazia)');
     return {};
   }
+
+  Future<String> _getBssidManually() async {
+  try {
+    final result = await Process.run(
+      'powershell',
+      [
+        '-Command',
+        // ADICIONE O 'r' AQUI:
+        r'(Get-NetAdapter | Where-Object {$_.Status -eq "Up" -and $_.PhysicalMediaType -like "*802.11*"} | Get-NetAdapterStatistics | Select-Object -First 1).MacAddress'
+      ],
+      runInShell: true,
+    );
+
+    final bssid = _decodeOutput(result.stdout).trim();
+    if (bssid.isNotEmpty && bssid != 'N/A') {
+      _logger.i('✅ BSSID coletado manually: $bssid');
+      return bssid;
+    }
+  } catch (e) {
+    _logger.e('❌ Erro ao coletar BSSID manualmente: $e');
+  }
+  return 'N/A';
+}
 
   // MODIFICADO: Agora usa _runScript
   Future<List<String>> _getInstalledPrograms() async {
@@ -196,10 +234,24 @@ class MonitoringService {
   }
 
   // ===================================================================
-  // ✅ FUNÇÃO DE ENVIO DE PAYLOAD (Sem alterações)
+  // ✅ FUNÇÃO DE ENVIO DE PAYLOAD (MODIFICADA)
   // ===================================================================
-  Future<void> _sendPayload(Map<String, dynamic> payload, String serverUrl, String moduleId) async {
+  Future<void> _sendPayload(Map<String, dynamic> payload, String serverUrl, String moduleId, String moduleType) async {
     try {
+      // ✅ VALIDA ANTES DE ENVIAR
+      final validation = PayloadValidator.validate(payload, moduleType);
+      
+      if (!validation.isValid) {
+        _logger.e('❌ Payload inválido:');
+        validation.errors.forEach((e) => _logger.e('   • $e'));
+        throw Exception('Payload inválido: ${validation.errors.join(', ')}');
+      }
+      
+      if (validation.warnings.isNotEmpty) {
+        _logger.w('⚠️ Avisos no payload:');
+        validation.warnings.forEach((w) => _logger.w('   • $w'));
+      }
+
       // 🔥 VALIDAÇÃO E SANITIZAÇÃO ROBUSTA
       String serial = (payload['serial_number'] ?? '').toString().trim();
       String assetName = (payload['asset_name'] ?? '').toString().trim();
@@ -257,11 +309,20 @@ class MonitoringService {
     } catch (e, stackTrace) {
       _logger.e('❌ ERRO no envio do payload: $e');
       _logger.d('Stack: $stackTrace');
+
+      // ✅ SALVA NO CACHE
+      await _cacheService.cacheFailedPayload({
+        ...payload,
+        'moduleId': moduleId,
+        'serverUrl': serverUrl,
+      });
+      
+      rethrow; // Relança o erro para o collectAndSendData tratar
     }
   }
 
   // ===================================================================
-  // ✅ MÉTODO PRINCIPAL DE COLETA E ENVIO
+  // ✅ MÉTODO PRINCIPAL DE COLETA E ENVIO (MODIFICADO)
   // ===================================================================
   Future<void> collectAndSendData({
     required String moduleId,
@@ -275,6 +336,9 @@ class MonitoringService {
       _logger.w('❌ Configurações incompletas. Abortando envio.');
       return;
     }
+
+    // ✅ TENTA ENVIAR DADOS EM CACHE PRIMEIRO
+    await _cacheService.syncCachedData(serverUrl, token);
 
     _logger.i('🔄 INICIANDO CICLO DE MONITORAMENTO');
     _logger.d('📋 Módulo: $moduleId');
@@ -298,6 +362,7 @@ class MonitoringService {
 
         if (printers.isEmpty) {
           _logger.i('Nenhuma impressora física encontrada para enviar.');
+          _consecutiveErrors = 0; // Reset em caso de sucesso
           _logger.i('✅ CICLO DE MONITORAMENTO (IMPRESSORAS) CONCLUÍDO\n');
           return;
         }
@@ -310,8 +375,10 @@ class MonitoringService {
               _logger.w('⚠️ Impressora [${printerPayload['serial_number']}] com campos obrigatórios ausentes. Pulando envio.');
               continue;
           }
-          await _sendPayload(printerPayload, serverUrl, moduleId);
+          // MODIFICADO: Passa o moduleType
+          await _sendPayload(printerPayload, serverUrl, moduleId, moduleType);
         }
+        _consecutiveErrors = 0; // Reset em caso de sucesso
         _logger.i('✅ CICLO DE MONITORAMENTO (IMPRESSORAS) CONCLUÍDO\n');
         return; 
       }
@@ -386,12 +453,48 @@ class MonitoringService {
       if (!_moduleStructureService.validateData(payload, structure.type)) {
         _logger.w('⚠️  Alguns campos obrigatórios estão ausentes');
       }
-      await _sendPayload(payload, serverUrl, moduleId);
+      // MODIFICADO: Passa o moduleType
+      await _sendPayload(payload, serverUrl, moduleId, moduleType);
+
+      _consecutiveErrors = 0; // Reset em caso de sucesso
 
     } catch (e) {
       _logger.e('❌ ERRO no ciclo de monitoramento: $e');
+
+      // NOVO: Lógica de erros consecutivos e backoff
+      _consecutiveErrors++;
+          
+      if (_consecutiveErrors >= _maxConsecutiveErrors) {
+        _logger.e('❌ CRÍTICO: $_consecutiveErrors erros consecutivos!');
+        _logger.e('    Possível problema: Servidor offline ou token inválido');
+        
+        // Notifica o usuário via notificação do Windows
+        await _showWindowsNotification(
+          'Erro de Sincronização',
+          'Verifique a conexão com o servidor'
+        );
+      }
+      
+      // Backoff exponencial
+      final delaySeconds = pow(2, min(_consecutiveErrors, 5)).toInt();
+      _logger.w('⏳ Aguardando ${delaySeconds}s antes de tentar novamente...');
+      await Future.delayed(Duration(seconds: delaySeconds));
+            
       rethrow;
     }
     _logger.i('✅ CICLO DE MONITORAMENTO (HOST) CONCLUÍDO\n');
   }
+  
+  Future<void> _showWindowsNotification(String title, String message) async {
+    try {
+      await Process.run('powershell', [
+        '-Command',
+        'New-BurnerToastNotification -Text "$title", "$message"'
+      ]);
+    } catch (e) {
+      _logger.w('Não foi possível mostrar notificação: $e');
+    }
+  }
+
+
 }
