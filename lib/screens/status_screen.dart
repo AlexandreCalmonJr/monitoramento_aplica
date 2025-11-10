@@ -1,5 +1,6 @@
 // File: lib/screens/status_screen.dart
 import 'dart:async';
+import 'dart:convert'; // Necessário para json.decode
 import 'dart:io';
 
 import 'package:agent_windows/providers/agent_provider.dart';
@@ -7,8 +8,10 @@ import 'package:agent_windows/services/background_service.dart';
 import 'package:agent_windows/services/service_locator.dart';
 import 'package:agent_windows/utils/app_logger.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle; // Necessário para rootBundle
 import 'package:intl/intl.dart'; // Import for DateFormat
 import 'package:logger/logger.dart';
+import 'package:path/path.dart' as p; // Necessário para p.join
 import 'package:provider/provider.dart';
 
 class StatusScreen extends StatefulWidget {
@@ -23,16 +26,41 @@ class _StatusScreenState extends State<StatusScreen> {
   final Logger _logger = locator<Logger>();
   Timer? _timer;
 
+  // --- INÍCIO DA CORREÇÃO ---
+  // Armazena o Future em uma variável de estado para evitar
+  // que o FutureBuilder o chame a cada segundo.
+  Future<Map<String, String>>? _networkInfoFuture;
+  // --- FIM DA CORREÇÃO ---
+
   @override
   void initState() {
     super.initState();
+
+    // --- INÍCIO DA CORREÇÃO ---
+    // Atribui o Future AQUI, no initState, para que ele
+    // seja executado apenas uma vez.
+    _networkInfoFuture = _getNetworkInfo();
+    // --- FIM DA CORREÇÃO ---
+
     // Inicia um timer para atualizar a UI (status de tempo) a cada segundo
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
-        setState(() {});
+        setState(() {}); // Este setState não irá mais recarregar o _networkInfoFuture
       }
     });
   }
+
+  // --- INÍCIO DA CORREÇÃO ---
+  // Nova função para permitir a atualização manual
+  void _refreshNetworkInfo() {
+    setState(() {
+      _logger.i('Atualizando informações de rede manualmente...');
+      // Substitui o future antigo por um novo,
+      // o que fará o FutureBuilder ser executado novamente.
+      _networkInfoFuture = _getNetworkInfo();
+    });
+  }
+  // --- FIM DA CORREÇÃO ---
 
   @override
   void dispose() {
@@ -167,66 +195,80 @@ class _StatusScreenState extends State<StatusScreen> {
     );
   }
 
+  // Helper para decodificar a saída do PowerShell
+  String _decodeOutput(dynamic output) {
+    if (output is List<int>) {
+      return latin1.decode(output, allowInvalid: true);
+    }
+    return output.toString();
+  }
+
+  /// Esta função agora está segura, pois só será chamada
+  /// pelo initState ou pelo botão de atualizar.
   Future<Map<String, String>> _getNetworkInfo() async {
+    // Adiciona um nome de arquivo único para evitar conflitos
+    final scriptName = 'get_core_system_info_${DateTime.now().millisecondsSinceEpoch}.ps1';
+    final tempDir = Directory.systemTemp;
+    final scriptFile = File(p.join(tempDir.path, scriptName));
+
     try {
+      // 1. Carrega o script dos assets
+      final scriptContent =
+          await rootBundle.loadString('assets/scripts/get_core_system_info.ps1');
+      await scriptFile.writeAsString(scriptContent, flush: true, encoding: utf8);
+
+      // 2. Executa o script
       final result = await Process.run(
         'powershell',
-        [
-          '-command',
-          r'''
-          $wifiAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and ($_.InterfaceDescription -match "Wi-Fi|Wireless") } | Select-Object -First 1
-          $ethernetAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and $_.InterfaceDescription -notmatch "Wi-Fi|Wireless|Virtual" } | Select-Object -First 1
-          $activeAdapter = if ($wifiAdapter) { $wifiAdapter } else { $ethernetAdapter }
-          $net = if ($activeAdapter) { Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $activeAdapter.InterfaceIndex | Select-Object -First 1 } else { $null }
-          
-          $bssid = $null; $ssid = $null; $signal = $null
-          if ($wifiAdapter) {
-              $wlanInfo = netsh wlan show interfaces | Select-String "BSSID", "SSID", "Signal"
-              foreach ($line in $wlanInfo) {
-                  $lineStr = $line.ToString().Trim()
-                  if ($lineStr -match "BSSID\s+:\s+(.+)") { $bssid = $Matches[1].Trim() }
-                  if ($lineStr -match "SSID\s+:\s+(.+)" -and $lineStr -notmatch "BSSID") { $ssid = $Matches[1].Trim() }
-                  if ($lineStr -match "Signal\s+:\s+(\d+)%") { $signal = $Matches[1].Trim() + "%" }
-              }
-          }
-          
-          $connectionType = if ($wifiAdapter -and $wifiAdapter.Status -eq "Up") { "WiFi" } else { "Ethernet" }
-          
-          Write-Output "TYPE:$connectionType"
-          Write-Output "IP:$($net.IPAddress)"
-          Write-Output "MAC:$($activeAdapter.MacAddress)"
-          if ($bssid) { Write-Output "BSSID:$bssid" }
-          if ($ssid) { Write-Output "SSID:$ssid" }
-          if ($signal) { Write-Output "SIGNAL:$signal" }
-          '''
-        ],
+        ['-ExecutionPolicy', 'Bypass', '-NoProfile', '-File', scriptFile.path],
         runInShell: true,
       );
 
-      final Map<String, String> info = {};
-      final lines = result.stdout.toString().split('\n');
+      final stdoutString = _decodeOutput(result.stdout);
+      final stderrString = _decodeOutput(result.stderr);
 
-      for (final line in lines) {
-        final trimmed = line.trim();
-        if (trimmed.startsWith('TYPE:')) {
-          info['connection_type'] = trimmed.substring(5);
-        } else if (trimmed.startsWith('IP:')) {
-          info['ip'] = trimmed.substring(3);
-        } else if (trimmed.startsWith('MAC:')) {
-          info['mac'] = trimmed.substring(4);
-        } else if (trimmed.startsWith('BSSID:')) {
-          info['bssid'] = trimmed.substring(6);
-        } else if (trimmed.startsWith('SSID:')) {
-          info['wifi_ssid'] = trimmed.substring(5);
-        } else if (trimmed.startsWith('SIGNAL:')) {
-          info['signal'] = trimmed.substring(7);
-        }
+      if (result.exitCode != 0) {
+        _logger.e('Erro no script: $stderrString (Arquivo: ${scriptFile.path})');
+        throw Exception('Erro no script: $stderrString');
       }
+
+      if (stdoutString.isEmpty) {
+        throw Exception('Script não retornou nada');
+      }
+
+      // 3. Decodifica o JSON retornado pelo script
+      final Map<String, dynamic> data = json.decode(stdoutString);
+
+      // 4. Mapeia os campos do JSON para os campos que o widget espera
+      final Map<String, String> info = {
+        'connection_type': data['connection_type']?.toString() ?? 'N/A',
+        'ip': data['ip_address']?.toString() ?? 'N/A',
+        'mac': data['mac_address']?.toString() ?? 'N/A',
+        'bssid': data['mac_address_radio']?.toString() ?? 'N/A',
+        'wifi_ssid': data['wifi_ssid']?.toString() ?? 'N/A',
+        'signal': data['wifi_signal']?.toString() ?? 'N/A',
+      };
+
+      // Garante que valores vazios ou 'null' apareçam como 'N/A'
+      info.forEach((key, value) {
+        if (value.trim().isEmpty || value.toLowerCase() == 'null') {
+          info[key] = 'N/A';
+        }
+      });
 
       return info;
     } catch (e) {
-      _logger.e('Erro ao obter informações de rede: $e');
+      _logger.e('Erro ao obter informações de rede (get_core_system_info): $e');
       return {'connection_type': 'Erro', 'ip': 'N/A', 'mac': 'N/A'};
+    } finally {
+      // Limpa o arquivo temporário
+      try {
+        if (await scriptFile.exists()) {
+          await scriptFile.delete();
+        }
+      } catch (e) {
+        _logger.w('Falha ao deletar script temporário: ${scriptFile.path}, $e');
+      }
     }
   }
 
@@ -295,23 +337,44 @@ class _StatusScreenState extends State<StatusScreen> {
                                     ? 'Não definido'
                                     : provider.floorController.text),
                             const Divider(height: 24),
-                            const Row(
+                            Row(
                               children: [
-                                Icon(Icons.wifi, size: 16, color: Colors.blue),
-                                SizedBox(width: 8),
-                                Text(
+                                const Icon(Icons.wifi, size: 16, color: Colors.blue),
+                                const SizedBox(width: 8),
+                                const Text(
                                   'Informações de Rede',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 14,
                                   ),
+                                ),
+                                const Spacer(), // <-- MUDANÇA
+                                // Botão de atualizar
+                                IconButton(
+                                  icon: const Icon(Icons.refresh, size: 18, color: Colors.grey),
+                                  onPressed: _refreshNetworkInfo, // <-- MUDANÇA
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  tooltip: 'Atualizar informações de rede',
                                 )
                               ],
                             ),
                             const SizedBox(height: 16),
                             FutureBuilder<Map<String, String>>(
-                              future: _getNetworkInfo(),
+                              future: _networkInfoFuture, // <-- MUDANÇA
                               builder: (context, snapshot) {
+                                if (snapshot.connectionState == ConnectionState.waiting) {
+                                  return const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  );
+                                }
+                                
+                                if (snapshot.hasError) {
+                                   return _buildInfoRow('Erro:', 'Falha ao carregar');
+                                }
+
                                 if (snapshot.hasData) {
                                   final info = snapshot.data!;
                                   return Column(
@@ -322,20 +385,17 @@ class _StatusScreenState extends State<StatusScreen> {
                                           'WiFi') ...[
                                         _buildInfoRow('Tipo:', '📶 WiFi'),
                                         const SizedBox(height: 8),
-                                        if (info['wifi_ssid'] != null)
-                                          _buildInfoRow(
-                                              'SSID:', info['wifi_ssid']!),
+                                        _buildInfoRow(
+                                            'SSID:', info['wifi_ssid'] ?? 'N/A'),
                                         const SizedBox(height: 8),
-                                        if (info['bssid'] != null)
-                                          _buildInfoRow(
-                                              'BSSID:', info['bssid']!),
+                                        _buildInfoRow(
+                                            'BSSID:', info['bssid'] ?? 'N/A'),
                                         const SizedBox(height: 8),
-                                        if (info['signal'] != null)
-                                          _buildInfoRow(
-                                              'Sinal:', info['signal']!),
+                                        _buildInfoRow(
+                                            'Sinal:', info['signal'] ?? 'N/A'),
                                       ] else ...[
                                         _buildInfoRow('Tipo:',
-                                            '🔌 ${info['connection_type'] ?? 'Ethernet'}'),
+                                            '🔌 ${info['connection_type'] ?? 'N/A'}'),
                                       ],
                                       const SizedBox(height: 8),
                                       _buildInfoRow('IP:', info['ip'] ?? 'N/A'),
@@ -453,7 +513,7 @@ class _StatusScreenState extends State<StatusScreen> {
                             onPressed: () {
                               _logger.i('Sincronização forçada pelo usuário');
                               _backgroundService.runCycle();
-                              setState(() {});
+                              setState(() {}); // Atualiza o status na UI
                             },
                             icon: const Icon(Icons.sync_outlined, size: 20),
                             label: const Text('Forçar Sincronização'),

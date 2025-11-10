@@ -17,6 +17,25 @@ import 'package:provider/provider.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 
+// [INÍCIO DA NOVA CLASSE - OBRIGATÓRIA]
+// O pacote window_manager exige uma classe que implemente WindowListener
+// para lidar com eventos da janela.
+class MyWindowListener extends WindowListener {
+  final Logger logger;
+  MyWindowListener(this.logger); // Passamos o logger para poder usá-lo
+
+  @override
+  void onWindowClose() async {
+    // Apenas escondemos a janela.
+    await windowManager.hide();
+  }
+
+  @override
+  void onWindowMinimize() async {
+    await windowManager.hide(); // Apenas esconde a janela
+  }
+}
+// [FIM DA NOVA CLASSE]
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -35,6 +54,18 @@ Future<void> main() async {
 
   // 3. Configuração para o gerenciador de janela
   await windowManager.ensureInitialized();
+  
+  // [INÍCIO DA MODIFICAÇÃO CORRIGIDA]
+  // 1. Impede que o aplicativo feche ao clicar no 'X'
+  await windowManager.setPreventClose(true);
+
+  // 2. Cria e registra nosso "ouvinte" de eventos da janela
+  WindowListener listener = MyWindowListener(logger);
+  
+  // ## ESTA É A LINHA CORRIGIDA ##
+  windowManager.addListener(listener); // Correto: addListener
+  
+  // [FIM DA MODIFICAÇÃO CORRIGIDA]
   
   // 4. Inicia o serviço de background
   // Nós obtemos a instância do locator
