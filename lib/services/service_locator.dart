@@ -29,7 +29,8 @@ void setupLocator() {
         locator<Logger>(),
         locator<AuthService>(),
         locator<ModuleStructureService>(),
-        locator<LocalCacheService>(), // <-- CORRIGIDO
+        locator<LocalCacheService>(),
+        locator<SettingsService>(),
       ));
       
   locator.registerLazySingleton(() => BackgroundService(locator<Logger>(), locator<SettingsService>(), locator<MonitoringService>()));

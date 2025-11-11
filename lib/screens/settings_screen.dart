@@ -1,160 +1,448 @@
-import 'dart:convert';
-import 'dart:io';
-
+// File: lib/screens/settings_screen.dart
+// Exemplo de tela de configurações com opção de sistema legado
+import 'package:agent_windows/services/module_detection_service.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
 
 class SettingsScreen extends StatefulWidget {
+  final Logger logger;
+  final ModuleDetectionService detectionService;
+
+  const SettingsScreen({
+    Key? key,
+    required this.logger,
+    required this.detectionService,
+  }) : super(key: key);
+
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // --- Variáveis Adicionadas ---
-  // (Seus métodos dependiam delas, então eu as declarei)
-  final TextEditingController _ipController = TextEditingController();
-  final TextEditingController _portController = TextEditingController();
-  final Logger _logger = Logger();
-  // --- Fim das Variáveis Adicionadas ---
+  bool _forceLegacyMode = false;
+  bool _isDetecting = false;
+  SystemType? _detectedSystem;
+  String? _detectionMessage;
 
-  bool _isTesting = false;
-  String? _testResult;
-
-  // ✅ BOTÃO DE TESTE DE CONEXÃO
-  Future<void> _testConnection() async {
-    setState(() {
-      _isTesting = true;
-      _testResult = null;
-    });
-
-    try {
-      final serverUrl = 'http://${_ipController.text}:${_portController.text}';
-
-      // Testa conectividade básica
-      final response = await http
-          .get(
-            Uri.parse('$serverUrl/health'),
-          )
-          .timeout(Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        setState(() {
-          _testResult = '✅ Servidor Online\n'
-              'Status: ${data['status']}\n'
-              'MongoDB: ${data['mongodb']}\n'
-              'Uptime: ${data['uptimeFormatted']}';
-        });
-      } else {
-        setState(() {
-          _testResult =
-              '❌ Servidor respondeu com erro: ${response.statusCode}';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        _testResult = '❌ Falha na conexão:\n${e.toString()}';
-      });
-    } finally {
-      setState(() => _isTesting = false);
-    }
-  }
-
-  // ✅ AUTO-DETECÇÃO DE SERVIDOR NA REDE
-  Future<void> _autoDetectServer() async {
-    setState(() => _isTesting = true);
-
-    try {
-      // Obtém IP local
-      final localIp = await _getLocalIp();
-      final subnet = localIp.substring(0, localIp.lastIndexOf('.'));
-
-      _logger.i('🔍 Procurando servidor na rede: $subnet.x');
-
-      // Testa IPs .1 a .254 na subnet
-      for (int i = 1; i <= 254; i++) {
-        final testIp = '$subnet.$i';
-
-        try {
-          final response = await http
-              .get(
-                Uri.parse('http://$testIp:3000/health'),
-              )
-              .timeout(Duration(seconds: 2));
-
-          if (response.statusCode == 200) {
-            _logger.i('✅ Servidor encontrado: $testIp');
-            setState(() {
-              _ipController.text = testIp;
-              _portController.text = '3000';
-              _testResult = '✅ Servidor encontrado automaticamente!';
-            });
-            return;
-          }
-        } catch (e) {
-          // Ignora erros e continua
-        }
-      }
-
-      setState(() {
-        _testResult = '❌ Nenhum servidor encontrado na rede';
-      });
-    } finally {
-      setState(() => _isTesting = false);
-    }
-  }
-
-  Future<String> _getLocalIp() async {
-    for (var interface in await NetworkInterface.list()) {
-      for (var addr in interface.addresses) {
-        if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
-          return addr.address;
-        }
-      }
-    }
-    return '192.168.0.1';
-  }
-
-  // --- Método Build Adicionado ---
-  // (Obrigatório para o Widget funcionar como uma tela)
   @override
   Widget build(BuildContext context) {
-    // Você precisa adicionar sua UI (Widgets) aqui
     return Scaffold(
       appBar: AppBar(
-        title: Text('Configurações'),
+        title: const Text('Configurações de Monitoramento'),
+        backgroundColor: Colors.blue,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Exemplo de como usar os controllers
-            TextField(
-              controller: _ipController,
-              decoration: InputDecoration(labelText: 'IP do Servidor'),
-            ),
-            TextField(
-              controller: _portController,
-              decoration: InputDecoration(labelText: 'Porta'),
-            ),
-            SizedBox(height: 20),
-            _isTesting
-                ? CircularProgressIndicator()
-                : ElevatedButton(
-                    onPressed: _testConnection,
-                    child: Text('Testar Conexão'),
-                  ),
-            SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: _autoDetectServer,
-              child: Text('Auto-Detectar Servidor'),
-            ),
-            SizedBox(height: 20),
-            if (_testResult != null) Text(_testResult!),
+            // Cartão de Detecção Automática
+            _buildDetectionCard(),
+            
+            const SizedBox(height: 24),
+            
+            // Cartão de Modo Forçado
+            _buildForceModeCard(),
+            
+            const SizedBox(height: 24),
+            
+            // Cartão de Informações
+            _buildInfoCard(),
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildDetectionCard() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.search, color: Colors.blue, size: 28),
+                const SizedBox(width: 12),
+                const Text(
+                  'Detecção Automática',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Detecta automaticamente qual sistema de monitoramento está ativo no servidor.',
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            
+            if (_detectedSystem != null) ...[
+              _buildSystemIndicator(),
+              const SizedBox(height: 12),
+            ],
+            
+            if (_detectionMessage != null) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _detectionMessage!,
+                        style: TextStyle(color: Colors.blue.shade900),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            
+            ElevatedButton.icon(
+              onPressed: _isDetecting ? null : _detectSystem,
+              icon: _isDetecting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh),
+              label: Text(_isDetecting ? 'Detectando...' : 'Detectar Sistema'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSystemIndicator() {
+    IconData icon;
+    Color color;
+    String title;
+    String description;
+
+    switch (_detectedSystem!) {
+      case SystemType.newModules:
+        icon = Icons.widgets;
+        color = Colors.green;
+        title = 'Sistema Novo';
+        description = 'Módulos customizados detectados';
+        break;
+      case SystemType.legacyTotem:
+        icon = Icons.desktop_windows;
+        color = Colors.orange;
+        title = 'Sistema Legado';
+        description = 'Sistema de Totem detectado';
+        break;
+      case SystemType.both:
+        icon = Icons.sync_alt;
+        color = Colors.purple;
+        title = 'Modo Híbrido';
+        description = 'Ambos os sistemas estão ativos';
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [color.withOpacity(0.1), color.withOpacity(0.05)],
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 32),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[700],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.check_circle, color: color, size: 28),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildForceModeCard() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.settings, color: Colors.orange, size: 28),
+                const SizedBox(width: 12),
+                const Text(
+                  'Modo Forçado',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Força o uso do sistema legado de Totem, ignorando a detecção automática.',
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            SwitchListTile(
+              value: _forceLegacyMode,
+              onChanged: (value) {
+                setState(() {
+                  _forceLegacyMode = value;
+                });
+              },
+              title: const Text('Forçar Sistema Legado'),
+              subtitle: Text(
+                _forceLegacyMode
+                    ? 'Enviando apenas para sistema legado de Totem'
+                    : 'Usando detecção automática',
+                style: TextStyle(
+                  color: _forceLegacyMode ? Colors.orange : Colors.grey,
+                ),
+              ),
+              activeColor: Colors.orange,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            
+            if (_forceLegacyMode)
+              Container(
+                margin: const EdgeInsets.only(top: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber, color: Colors.orange, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Modo legado ativo. Os dados serão enviados apenas para /api/monitoring/data',
+                        style: TextStyle(
+                          color: Colors.orange.shade900,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoCard() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.info_outline, color: Colors.blue, size: 28),
+                const SizedBox(width: 12),
+                const Text(
+                  'Informações',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _buildInfoRow(
+              icon: Icons.widgets,
+              title: 'Sistema Novo',
+              description: 'Usa módulos customizados (/api/modules)',
+            ),
+            const Divider(height: 24),
+            _buildInfoRow(
+              icon: Icons.desktop_windows,
+              title: 'Sistema Legado',
+              description: 'Usa sistema de Totem (/api/monitoring)',
+            ),
+            const Divider(height: 24),
+            _buildInfoRow(
+              icon: Icons.sync_alt,
+              title: 'Modo Híbrido',
+              description: 'Envia para ambos os sistemas simultaneamente',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow({
+    required IconData icon,
+    required String title,
+    required String description,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.blue.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: Colors.blue, size: 24),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                description,
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _detectSystem() async {
+    setState(() {
+      _isDetecting = true;
+      _detectionMessage = null;
+    });
+
+    try {
+      // Aqui você precisaria ter acesso ao serverUrl e token
+      // Este é apenas um exemplo de como chamar o serviço
+      final detection = await widget.detectionService.detectActiveSystem(
+        serverUrl: 'http://seu-servidor:3000', // Substituir pelo real
+        token: 'seu-token', // Substituir pelo real
+      );
+
+      setState(() {
+        _detectedSystem = detection.systemType;
+        _detectionMessage = _getDetectionMessage(detection);
+        _isDetecting = false;
+      });
+
+      // Mostra notificação de sucesso
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_detectionMessage ?? 'Detecção concluída'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _isDetecting = false;
+        _detectionMessage = 'Erro na detecção: ${e.toString()}';
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao detectar sistema: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  String _getDetectionMessage(ModuleDetectionResult detection) {
+    switch (detection.systemType) {
+      case SystemType.newModules:
+        return 'Sistema novo detectado. Módulo: ${detection.primaryModuleType ?? "N/A"}';
+      case SystemType.legacyTotem:
+        return 'Sistema legado de Totem detectado';
+      case SystemType.both:
+        return 'Ambos os sistemas detectados. Dados serão enviados para ambos.';
+    }
+  }
+
+  // Método para obter a configuração atual
+  Map<String, dynamic> getConfiguration() {
+    return {
+      'forceLegacyMode': _forceLegacyMode,
+      'detectedSystem': _detectedSystem?.toString(),
+    };
   }
 }
