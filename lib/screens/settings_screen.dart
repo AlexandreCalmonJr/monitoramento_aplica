@@ -1,31 +1,39 @@
 // File: lib/screens/settings_screen.dart
 // Exemplo de tela de configurações com opção de sistema legado
+import 'package:agent_windows/providers/agent_provider.dart'; // <-- ADICIONADO
 import 'package:agent_windows/services/module_detection_service.dart';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
+import 'package:provider/provider.dart'; // <-- ADICIONADO
 
 class SettingsScreen extends StatefulWidget {
   final Logger logger;
   final ModuleDetectionService detectionService;
 
   const SettingsScreen({
-    Key? key,
+    super.key,
     required this.logger,
     required this.detectionService,
-  }) : super(key: key);
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _forceLegacyMode = false;
+  // bool _forceLegacyMode = false; // <-- REMOVIDO
   bool _isDetecting = false;
   SystemType? _detectedSystem;
   String? _detectionMessage;
 
   @override
   Widget build(BuildContext context) {
+    // --- INÍCIO DA ADIÇÃO ---
+    // Lê o provider para obter o estado atual
+    final agentProvider = context.watch<AgentProvider>();
+    final bool forceLegacyMode = agentProvider.forceLegacyMode;
+    // --- FIM DA ADIÇÃO ---
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Configurações de Monitoramento'),
@@ -42,7 +50,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 24),
             
             // Cartão de Modo Forçado
-            _buildForceModeCard(),
+            // --- MUDANÇA ---
+            _buildForceModeCard(agentProvider, forceLegacyMode),
+            // --- FIM DA MUDANÇA ---
             
             const SizedBox(height: 24),
             
@@ -211,7 +221,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildForceModeCard() {
+  // --- MUDANÇA ---
+  Widget _buildForceModeCard(AgentProvider provider, bool forceLegacyMode) {
+  // --- FIM DA MUDANÇA ---
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -240,19 +252,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const SizedBox(height: 16),
             SwitchListTile(
-              value: _forceLegacyMode,
+              // --- MUDANÇA ---
+              value: forceLegacyMode, // Usa o valor do provider
               onChanged: (value) {
-                setState(() {
-                  _forceLegacyMode = value;
-                });
+                // Chama o método do provider para salvar
+                context.read<AgentProvider>().updateForceLegacyMode(value);
               },
+              // --- FIM DA MUDANÇA ---
               title: const Text('Forçar Sistema Legado'),
               subtitle: Text(
-                _forceLegacyMode
+                forceLegacyMode // Usa o valor do provider
                     ? 'Enviando apenas para sistema legado de Totem'
                     : 'Usando detecção automática',
                 style: TextStyle(
-                  color: _forceLegacyMode ? Colors.orange : Colors.grey,
+                  color: forceLegacyMode ? Colors.orange : Colors.grey, // Usa o valor do provider
                 ),
               ),
               activeColor: Colors.orange,
@@ -261,7 +274,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             
-            if (_forceLegacyMode)
+            if (forceLegacyMode) // Usa o valor do provider
               Container(
                 margin: const EdgeInsets.only(top: 12),
                 padding: const EdgeInsets.all(12),
@@ -387,12 +400,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _detectionMessage = null;
     });
 
+    // --- INÍCIO DA MUDANÇA ---
+    // Busca o provider para pegar IP e Token reais
+    final agentProvider = context.read<AgentProvider>();
+    final serverUrl = 'http://${agentProvider.ipController.text}:${agentProvider.portController.text}';
+    final token = agentProvider.tokenController.text;
+    
+    // Validação básica
+    if (agentProvider.ipController.text.isEmpty || agentProvider.tokenController.text.isEmpty) {
+       setState(() {
+        _isDetecting = false;
+        _detectionMessage = 'Erro: IP do servidor ou Token não configurados na tela anterior.';
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_detectionMessage!),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    // --- FIM DA MUDANÇA ---
+
     try {
-      // Aqui você precisaria ter acesso ao serverUrl e token
-      // Este é apenas um exemplo de como chamar o serviço
       final detection = await widget.detectionService.detectActiveSystem(
-        serverUrl: 'http://seu-servidor:3000', // Substituir pelo real
-        token: 'seu-token', // Substituir pelo real
+        serverUrl: serverUrl, // Usa o valor do provider
+        token: token,       // Usa o valor do provider
       );
 
       setState(() {
@@ -440,8 +474,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // Método para obter a configuração atual
   Map<String, dynamic> getConfiguration() {
+    // Agora lê o valor real do provider
+    final forceLegacyMode = context.read<AgentProvider>().forceLegacyMode;
     return {
-      'forceLegacyMode': _forceLegacyMode,
+      'forceLegacyMode': forceLegacyMode,
       'detectedSystem': _detectedSystem?.toString(),
     };
   }

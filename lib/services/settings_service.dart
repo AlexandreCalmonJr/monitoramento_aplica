@@ -12,7 +12,8 @@ class SettingsService {
   late String sector;
   late String floor;
   late String token;
-  late String assetName; // <-- NOVO
+  late String assetName; //
+  late bool forceLegacyMode; // <-- ADIÇÃO 1
 
   SettingsService(this._logger) {
     _logger.i('SettingsService inicializado');
@@ -27,7 +28,8 @@ class SettingsService {
     sector = prefs.getString('manual_sector') ?? '';
     floor = prefs.getString('manual_floor') ?? '';
     token = prefs.getString('auth_token') ?? '';
-    assetName = prefs.getString('asset_name') ?? ''; // <-- NOVO
+    assetName = prefs.getString('asset_name') ?? ''; //
+    forceLegacyMode = prefs.getBool('forceLegacyMode') ?? false; // <-- ADIÇÃO 2
     _logger.d('Configurações carregadas');
   }
 
@@ -39,7 +41,8 @@ class SettingsService {
     required String newSector,
     required String newFloor,
     required String newToken,
-    required String newAssetName, // <-- NOVO
+    required String newAssetName, //
+    required bool newForceLegacyMode, // <-- ADIÇÃO 3
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('server_ip', newIp);
@@ -49,7 +52,8 @@ class SettingsService {
     await prefs.setString('manual_sector', newSector);
     await prefs.setString('manual_floor', newFloor);
     await prefs.setString('auth_token', newToken); 
-    await prefs.setString('asset_name', newAssetName); // <-- NOVO
+    await prefs.setString('asset_name', newAssetName); //
+    await prefs.setBool('forceLegacyMode', newForceLegacyMode); // <-- ADIÇÃO 4
     
     // Atualiza as variáveis locais
     ip = newIp;
@@ -59,8 +63,19 @@ class SettingsService {
     sector = newSector;
     floor = newFloor;
     token = newToken;
-    assetName = newAssetName; // <-- NOVO
+    assetName = newAssetName; //
+    forceLegacyMode = newForceLegacyMode; // <-- ADIÇÃO 5
     
     _logger.i('Configurações salvas: Módulo $newModuleId, Servidor $newIp:$newPort');
   }
+
+  // --- ADIÇÃO 6: MÉTODO PARA SALVAR APENAS O MODO LEGADO ---
+  // Este método é usado pela settings_screen.dart
+  Future<void> saveForceLegacyMode(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('forceLegacyMode', value);
+    forceLegacyMode = value; // Atualiza a variável local
+    _logger.i('Modo legado forçado salvo: $value');
+  }
+  // --- FIM DA ADIÇÃO 6 ---
 }

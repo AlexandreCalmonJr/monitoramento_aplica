@@ -1,13 +1,16 @@
 // File: lib/services/service_locator.dart
 import 'package:agent_windows/services/auth_service.dart';
 import 'package:agent_windows/services/background_service.dart';
-import 'package:agent_windows/services/local_cache_service.dart'; // IMPORT NECESSÁRIO
+import 'package:agent_windows/services/local_cache_service.dart';
+// --- INÍCIO DA ADIÇÃO (IMPORT QUE FALTAVA) ---
+import 'package:agent_windows/services/module_detection_service.dart';
 import 'package:agent_windows/services/module_structure_service.dart';
 import 'package:agent_windows/services/monitoring_service.dart';
 import 'package:agent_windows/services/settings_service.dart';
 import 'package:agent_windows/utils/app_logger.dart';
 import 'package:get_it/get_it.dart';
 import 'package:logger/logger.dart';
+// --- FIM DA ADIÇÃO ---
 
 final locator = GetIt.instance;
 
@@ -19,12 +22,18 @@ void setupLocator() {
   locator.registerLazySingleton(() => AuthService());
   locator.registerLazySingleton(() => SettingsService(locator<Logger>()));
   
-  // ✅ 1. ADICIONE O REGISTRO DO LocalCacheService
   locator.registerLazySingleton(() => LocalCacheService(locator<Logger>()));
 
   locator.registerLazySingleton(() => ModuleStructureService(locator<Logger>(), locator<AuthService>(), authService: locator<AuthService>()));
   
-  // ✅ 2. INJETE O SERVIÇO CORRETO (LocalCacheService)
+  // --- INÍCIO DA ADIÇÃO (SERVIÇO QUE FALTAVA) ---
+  // Registra o serviço de detecção para que a StatusScreen possa usá-lo
+  locator.registerLazySingleton<ModuleDetectionService>(() => ModuleDetectionService(
+        locator<Logger>(),
+        locator<AuthService>(),
+  ));
+  // --- FIM DA ADIÇÃO ---
+
   locator.registerLazySingleton(() => MonitoringService(
         locator<Logger>(),
         locator<AuthService>(),

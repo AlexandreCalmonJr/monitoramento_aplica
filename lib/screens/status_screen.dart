@@ -4,9 +4,14 @@ import 'dart:convert'; // Necessário para json.decode
 import 'dart:io';
 
 import 'package:agent_windows/providers/agent_provider.dart';
+// --- INÍCIO DA ADIÇÃO ---
+import 'package:agent_windows/screens/settings_screen.dart';
 import 'package:agent_windows/services/background_service.dart';
+import 'package:agent_windows/services/module_detection_service.dart';
 import 'package:agent_windows/services/service_locator.dart';
 import 'package:agent_windows/utils/app_logger.dart';
+// --- FIM DA ADIÇÃO ---
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle; // Necessário para rootBundle
 import 'package:intl/intl.dart'; // Import for DateFormat
@@ -271,6 +276,21 @@ class _StatusScreenState extends State<StatusScreen> {
       }
     }
   }
+
+  // --- INÍCIO DA ADIÇÃO ---
+  /// Abre a tela de configurações (settings_screen.dart)
+  void _openSettings(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SettingsScreen(
+          logger: locator<Logger>(),
+          detectionService: locator<ModuleDetectionService>(),
+        ),
+      ),
+    );
+  }
+  // --- FIM DA ADIÇÃO ---
 
   @override
   Widget build(BuildContext context) {
@@ -561,28 +581,44 @@ class _StatusScreenState extends State<StatusScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    // SEGUNDA LINHA DE BOTÕES
+                    
+                    // --- INÍCIO DA MUDANÇA ---
+                    // SEGUNDA LINHA DE BOTÕES (Atualizada)
                     Row(
                       children: [
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () => _showSystemInfo(
-                                context), // NOVO: Você vai criar esse método
+                            onPressed: () => _showSystemInfo(context),
                             icon: const Icon(Icons.info_outline, size: 18),
-                            label: const Text('Info do Sistema'),
+                            label: const Text('Info'), // Texto reduzido
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.blue,
                             ),
                           ),
                         ),
+                        
+                        // --- BOTÃO NOVO ADICIONADO ---
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openSettings(context),
+                            icon: const Icon(Icons.settings_applications_outlined, size: 18),
+                            label: const Text('Ajustes'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.grey[300],
+                            ),
+                          ),
+                        ),
+                        // --- FIM DO NOVO BOTÃO ---
+
                         const SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton.icon(
                             onPressed: () => context
                                 .read<AgentProvider>()
                                 .enterReconfiguration(),
-                            icon: const Icon(Icons.settings_outlined, size: 20),
-                            label: const Text('Reconfigurar'),
+                            icon: const Icon(Icons.replay_outlined, size: 20), // Ícone mudado
+                            label: const Text('Mudar'), // Texto reduzido
                             style: ElevatedButton.styleFrom(
                               backgroundColor: theme.colorScheme.secondary,
                             ),
@@ -590,6 +626,7 @@ class _StatusScreenState extends State<StatusScreen> {
                         ),
                       ],
                     ),
+                    // --- FIM DA MUDANÇA ---
                   ],
                 ),
               ),

@@ -67,40 +67,57 @@ class BackgroundService {
       'sector': _settingsService.sector,
       'floor': _settingsService.floor,
       'token': _settingsService.token,
-      'assetName': _settingsService.assetName, // <-- NOVO
+      'assetName': _settingsService.assetName,
+      'forceLegacyMode': _settingsService.forceLegacyMode, // <-- ADICIONE ESTA LINHA
     };
 
     _isRunning = true;
-    startTime = DateTime.now(); // NOVO
+    startTime = DateTime.now(); 
     _logger.i('✅ Background Service: Iniciado');
     _logger.i('   Módulo: ${_settingsService.moduleId}');
     _logger.i('   Servidor: ${_currentSettings!['serverUrl']}');
     _logger.i('   Intervalo: ${_settingsService.interval}s');
     
-    await runCycle();
+    // --- INÍCIO DA CORREÇÃO DO TIMER ---
+    // Cancela qualquer timer antigo
+    _timer?.cancel();
+
+    // Executa o primeiro ciclo imediatamente
+    await runCycle(); 
     
+    // Agenda os ciclos futuros
+    _scheduleNextRun(_settingsService.interval);
+    // --- FIM DA CORREÇÃO DO TIMER ---
   }
 
   Future<void> runCycle() async {
     if (_currentSettings == null) {
       _logger.w('⚠️  Background Service: Configurações ausentes');
       lastRunStatus = "Erro: Config ausente";
+      errorCount++;
       return;
     }
+
+    // Atualiza o horário da próxima execução (para a UI)
+    final interval = _currentSettings!['interval'] as int? ?? 300;
+    nextRunTime = DateTime.now().add(Duration(seconds: interval));
 
     final moduleId = _currentSettings!['moduleId'] as String?;
     final serverUrl = _currentSettings!['serverUrl'] as String?;
     final sector = _currentSettings!['sector'] as String?;
     final floor = _currentSettings!['floor'] as String?;
     final token = _currentSettings!['token'] as String?;
-    final assetName = _currentSettings!['assetName'] as String?; // <-- NOVO
+    final assetName = _currentSettings!['assetName'] as String?; 
+    
+    // --- ADIÇÃO DA LEITURA DO MODO LEGADO ---
+final forceLegacyMode = _currentSettings!['forceLegacyMode'] as bool? ?? false;
 
     if (moduleId == null || moduleId.isEmpty || 
         serverUrl == null || serverUrl.isEmpty ||
         token == null || token.isEmpty) {
       _logger.e('❌ Background Service: Configurações incompletas para executar ciclo');
       lastRunStatus = "Erro: Config incompleta";
-      errorCount++; // NOVO
+      errorCount++; 
       return;
     }
 
@@ -114,34 +131,64 @@ class BackgroundService {
         manualSector: sector,
         manualFloor: floor,
         token: token,
-        manualAssetName: assetName, // <-- NOVO
+        manualAssetName: assetName,
+        forceLegacyMode: forceLegacyMode, // <-- ADICIONE ESTE PARÂMETRO
       );
       
       _logger.i('✅ CICLO CONCLUÍDO COM SUCESSO');
       lastRunStatus = "Sucesso";
-      syncCount++; // NOVO
+      syncCount++; 
     } catch (e, stackTrace) {
       _logger.e('❌ ERRO NO CICLO DE MONITORAMENTO', error: e, stackTrace: stackTrace);
       lastRunStatus = "Erro: ${e.toString().substring(0, (e.toString().length < 50) ? e.toString().length : 50)}...";
-      errorCount++; // NOVO
+      errorCount++; 
     }
     
     lastRunTime = DateTime.now();
   }
 
-  Future<void> updateSettings(Map<String, dynamic> settings) async {
+  Future<void> updateSettings(Map<String, dynamic> newSettings) async {
     _logger.i('🔄 Background Service: Atualizando configurações');
     
-    _currentSettings = settings;
+    // --- INÍCIO DA CORREÇÃO DO BUG 1 ---
+    // Garante que _currentSettings não seja nulo
+    _currentSettings ??= {};
     
-    // Cancela o timer atual e reagenda
+    // Mescla as novas configurações com as existentes, em vez de substituir
+    _currentSettings!.addAll(newSettings);
+    // --- FIM DA CORREÇÃO DO BUG 1 ---
+    
+    // Cancela o timer antigo
     _timer?.cancel();
     
-    
-    // Executa imediatamente com as novas configurações
     _logger.i('⚡ Executando ciclo imediato com novas configurações...');
-    await runCycle();
+    await runCycle(); // Executa 1x com as novas configs
+
+    // --- INÍCIO DA CORREÇÃO DO TIMER 2 ---
+    // Reagenda o timer com o novo intervalo (se houver)
+    final intervalSeconds = _currentSettings!['interval'] as int? ?? _settingsService.interval;
+    _scheduleNextRun(intervalSeconds);
+    // --- FIM DA CORREÇÃO DO TIMER 2 ---
   }
+
+  // --- MÉTODO AUXILIAR ADICIONADO ---
+  void _scheduleNextRun(int intervalSeconds) {
+    _logger.i('   Agendando próximo ciclo em $intervalSeconds segundos');
+    
+    // Atualiza a UI
+    nextRunTime = DateTime.now().add(Duration(seconds: intervalSeconds));
+
+    _timer = Timer.periodic(Duration(seconds: intervalSeconds), (timer) {
+      if (_isRunning) {
+        _logger.d('Timer disparado, executando ciclo...');
+        runCycle(); // Não precisa de await aqui, o timer cuida do loop
+      } else {
+        _logger.w('Timer disparado, mas serviço está parado. Cancelando timer.');
+        timer.cancel();
+      }
+    });
+  }
+  // --- FIM DO MÉTODO AUXILIAR ---
 
   void stop() {
     _timer?.cancel();
@@ -162,5 +209,4 @@ class BackgroundService {
     startTime = DateTime.now();
     _logger.i('🔄 Contadores resetados');
   }
-
 }
