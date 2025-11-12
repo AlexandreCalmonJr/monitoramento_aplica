@@ -14,10 +14,11 @@ class LegacyTotemService {
   LegacyTotemService(this._logger);
 
   /// Envia dados para o endpoint legado de Totem
-  /// Rota: POST /api/monitoring/data
+  /// Rota: POST /api/monitor
   Future<bool> sendTotemData({
     required String serverUrl,
     required Map<String, dynamic> systemInfo,
+    required String token, // ⬅️ ADICIONADO (Correto)
     String? sector,
     String? floor,
   }) async {
@@ -28,9 +29,13 @@ class LegacyTotemService {
       _logger.i('📤 Enviando dados para sistema legado de Totem...');
       _logger.d('   Payload: ${payload['serialNumber']} - ${payload['hostname']}');
 
+      // ⬇️ MODIFICADO: Corrigido o endpoint e adicionado o token
       final response = await http.post(
-        Uri.parse('$serverUrl/api/monitoring/data'),
-        headers: {'Content-Type': 'application/json'},
+        Uri.parse('$serverUrl/api/monitor'), // CORREÇÃO: Rota é /api/monitor
+        headers: {
+          'Content-Type': 'application/json',
+          'AUTH_TOKEN': token, // ⬅️ Header de autenticação legado (Correto)
+        },
         body: json.encode(payload),
       ).timeout(const Duration(seconds: 30));
 
