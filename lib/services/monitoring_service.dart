@@ -241,13 +241,17 @@ class MonitoringService {
       
       if (!validation.isValid) {
         _logger.e('❌ Payload inválido:');
-        validation.errors.forEach((e) => _logger.e('   • $e'));
+        for (var e in validation.errors) {
+          _logger.e('   • $e');
+        }
         throw Exception('Payload inválido: ${validation.errors.join(', ')}');
       }
       
       if (validation.warnings.isNotEmpty) {
         _logger.w('⚠️ Avisos no payload:');
-        validation.warnings.forEach((w) => _logger.w('   • $w'));
+        for (var w in validation.warnings) {
+          _logger.w('   • $w');
+        }
       }
 
       String serial = (payload['serial_number'] ?? '').toString().trim();
