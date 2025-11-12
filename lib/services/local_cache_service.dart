@@ -13,6 +13,9 @@ class LocalCacheService {
   /// Salva dados localmente quando o envio falha
   Future<void> cacheFailedPayload(Map<String, dynamic> payload) async {
     try {
+      // CORREÇÃO (Item 16): Limpa arquivos com mais de 7 dias
+      await _cleanOldCacheFiles();
+      
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final file = File('$_cacheDir/payload_$timestamp.json');
       await file.create(recursive: true);
@@ -61,6 +64,27 @@ class LocalCacheService {
       }
     } catch (e) {
       _logger.e('Erro ao sincronizar cache: $e');
+    }
+  }
+
+  // CORREÇÃO (Item 16): Adicionar limpeza de arquivos antigos
+  Future<void> _cleanOldCacheFiles() async {
+    try {
+      final dir = Directory(_cacheDir);
+      if (!await dir.exists()) return;
+
+      final cutoff = DateTime.now().subtract(const Duration(days: 7));
+      final files = dir.listSync().whereType<File>();
+
+      for (final file in files) {
+        final stat = await file.stat();
+        if (stat.modified.isBefore(cutoff)) {
+          await file.delete();
+          _logger.d('Arquivo de cache antigo deletado: ${file.path}');
+        }
+      }
+    } catch (e) {
+      _logger.w('Falha ao limpar cache antigo: $e');
     }
   }
 }

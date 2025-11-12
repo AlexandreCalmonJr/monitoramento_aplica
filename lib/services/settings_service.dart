@@ -12,7 +12,9 @@ class SettingsService {
   late String sector;
   late String floor;
   late String token;
-  late String assetName; //
+  
+  /// CORREÇÃO (Item 7): Nome manual do ativo. Se vazio, usa hostname automaticamente.
+  late String assetName; 
   late bool forceLegacyMode; // <-- ADIÇÃO 1
 
   SettingsService(this._logger) {
@@ -69,7 +71,7 @@ class SettingsService {
     _logger.i('Configurações salvas: Módulo $newModuleId, Servidor $newIp:$newPort');
   }
 
-  // --- ADIÇÃO 6: MÉTODO PARA SALVAR APENAS O MODO LEGADO ---
+  // --- CORREÇÃO (Item 9): MÉTODO PARA SALVAR APENAS O MODO LEGADO ---
   // Este método é usado pela settings_screen.dart
   Future<void> saveForceLegacyMode(bool value) async {
     final prefs = await SharedPreferences.getInstance();
@@ -77,5 +79,5 @@ class SettingsService {
     forceLegacyMode = value; // Atualiza a variável local
     _logger.i('Modo legado forçado salvo: $value');
   }
-  // --- FIM DA ADIÇÃO 6 ---
+  // --- FIM DA CORREÇÃO ---
 }

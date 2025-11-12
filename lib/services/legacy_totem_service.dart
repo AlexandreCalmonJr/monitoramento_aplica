@@ -8,6 +8,9 @@ import 'package:logger/logger.dart';
 class LegacyTotemService {
   final Logger _logger;
 
+  // CORREÇÃO (Item 19): Criar constante
+  static const String _notDetected = 'Não detectado';
+
   LegacyTotemService(this._logger);
 
   /// Envia dados para o endpoint legado de Totem
@@ -91,7 +94,8 @@ class LegacyTotemService {
   /// Extrai status da impressora dos dados do sistema
   String _extractPrinterStatus(Map<String, dynamic> systemInfo) {
     final connectedPrinter = systemInfo['connected_printer'];
-    if (connectedPrinter != null && connectedPrinter != 'Não detectado') {
+    // CORREÇÃO (Item 19): Usar constante
+    if (connectedPrinter != null && connectedPrinter != _notDetected) {
       return connectedPrinter.toString();
     }
     return 'N/A';
@@ -100,7 +104,8 @@ class LegacyTotemService {
   /// Extrai status do leitor biométrico
   String _extractBiometricStatus(Map<String, dynamic> systemInfo) {
     final biometric = systemInfo['biometric_reader'];
-    if (biometric != null && biometric != 'Não detectado') {
+    // CORREÇÃO (Item 19): Usar constante
+    if (biometric != null && biometric != _notDetected) {
       return biometric.toString();
     }
     return 'N/A';
@@ -125,12 +130,14 @@ class LegacyTotemService {
   /// Infere o tipo de totem baseado nas características do dispositivo
   String _inferTotemType(Map<String, dynamic> systemInfo) {
     // Verifica se tem biométrico
+    // CORREÇÃO (Item 19): Usar constante
     final hasBiometric = systemInfo['biometric_reader'] != null &&
-        systemInfo['biometric_reader'] != 'Não detectado';
+        systemInfo['biometric_reader'] != _notDetected;
     
     // Verifica se tem impressora zebra/bematech
+    // CORREÇÃO (Item 19): Usar constante
     final hasPrinter = systemInfo['connected_printer'] != null &&
-        systemInfo['connected_printer'] != 'Não detectado';
+        systemInfo['connected_printer'] != _notDetected;
     
     if (hasBiometric && hasPrinter) {
       return 'Totem Completo';

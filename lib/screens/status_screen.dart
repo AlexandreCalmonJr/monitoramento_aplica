@@ -31,7 +31,7 @@ class _StatusScreenState extends State<StatusScreen> {
   final Logger _logger = locator<Logger>();
   Timer? _timer;
 
-  // --- INÍCIO DA CORREÇÃO ---
+  // --- INÍCIO DA CORREÇÃO (Item 10) ---
   // Armazena o Future em uma variável de estado para evitar
   // que o FutureBuilder o chame a cada segundo.
   Future<Map<String, String>>? _networkInfoFuture;
@@ -41,7 +41,7 @@ class _StatusScreenState extends State<StatusScreen> {
   void initState() {
     super.initState();
 
-    // --- INÍCIO DA CORREÇÃO ---
+    // --- INÍCIO DA CORREÇÃO (Item 10) ---
     // Atribui o Future AQUI, no initState, para que ele
     // seja executado apenas uma vez.
     _networkInfoFuture = _getNetworkInfo();
@@ -55,7 +55,7 @@ class _StatusScreenState extends State<StatusScreen> {
     });
   }
 
-  // --- INÍCIO DA CORREÇÃO ---
+  // --- INÍCIO DA CORREÇÃO (Item 10) ---
   // Nova função para permitir a atualização manual
   void _refreshNetworkInfo() {
     setState(() {
@@ -372,7 +372,7 @@ class _StatusScreenState extends State<StatusScreen> {
                                 // Botão de atualizar
                                 IconButton(
                                   icon: const Icon(Icons.refresh, size: 18, color: Colors.grey),
-                                  onPressed: _refreshNetworkInfo, // <-- MUDANÇA
+                                  onPressed: _refreshNetworkInfo, // <-- MUDANÇA (Item 10)
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(),
                                   tooltip: 'Atualizar informações de rede',
@@ -381,7 +381,7 @@ class _StatusScreenState extends State<StatusScreen> {
                             ),
                             const SizedBox(height: 16),
                             FutureBuilder<Map<String, String>>(
-                              future: _networkInfoFuture, // <-- MUDANÇA
+                              future: _networkInfoFuture, // <-- MUDANÇA (Item 10)
                               builder: (context, snapshot) {
                                 if (snapshot.connectionState == ConnectionState.waiting) {
                                   return const SizedBox(

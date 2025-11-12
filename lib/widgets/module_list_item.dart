@@ -52,9 +52,11 @@ class ModuleListItem extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
+                  // CORREÇÃO (Item 13): Usar _buildHighlightedText
+                  _buildHighlightedText(
                     module.name,
-                    style: theme.textTheme.titleMedium?.copyWith(
+                    searchQuery,
+                    theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -80,13 +82,15 @@ class ModuleListItem extends StatelessWidget {
                       if (module.description.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         Expanded(
-                          child: Text(
+                          child:
+                              // CORREÇÃO (Item 13): Usar _buildHighlightedText
+                              _buildHighlightedText(
                             module.description,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
+                            searchQuery,
+                            theme.textTheme.bodySmall?.copyWith(
                               color: Colors.grey[400],
                             ),
+                            maxLines: 1,
                           ),
                         ),
                       ],
@@ -121,6 +125,55 @@ class ModuleListItem extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  // CORREÇÃO (Item 13): Função para destacar o texto da busca
+  Widget _buildHighlightedText(
+      String text, String? query, TextStyle? style,
+      {int maxLines = 1}) {
+    if (query == null || query.isEmpty || !text.toLowerCase().contains(query.toLowerCase())) {
+      return Text(
+        text,
+        style: style,
+        maxLines: maxLines,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    final lowerText = text.toLowerCase();
+    final lowerQuery = query.toLowerCase();
+
+    final spans = <TextSpan>[];
+    int start = 0;
+    int index = lowerText.indexOf(lowerQuery);
+
+    while (index != -1) {
+      // Texto normal antes do match
+      if (index > start) {
+        spans.add(TextSpan(text: text.substring(start, index), style: style));
+      }
+      // Texto destacado
+      spans.add(TextSpan(
+        text: text.substring(index, index + query.length),
+        style: style?.copyWith(
+          backgroundColor: Colors.yellow.withOpacity(0.3),
+          fontWeight: FontWeight.bold,
+        ),
+      ));
+      start = index + query.length;
+      index = lowerText.indexOf(lowerQuery, start);
+    }
+
+    // Texto normal restante
+    if (start < text.length) {
+      spans.add(TextSpan(text: text.substring(start), style: style));
+    }
+
+    return RichText(
+      text: TextSpan(children: spans),
+      maxLines: maxLines,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }

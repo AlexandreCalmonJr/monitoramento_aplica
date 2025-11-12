@@ -264,6 +264,7 @@ class _OnboardingStep2 extends StatelessWidget {
                       module: module,
                       isSelected: provider.selectedModuleId == module.id,
                       onTap: () => provider.setSelectedModule(module.id),
+                      searchQuery: provider.searchQuery, // Passa a query para highlight
                     );
                   },
                 ),
@@ -357,7 +358,7 @@ class _OnboardingStep3 extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // <-- NOVO CAMPO ADICIONADO AQUI
+          // CORREÇÃO (Item 12): Campo de nome do ativo
           TextFormField(
             controller: provider.assetNameController,
             decoration: const InputDecoration(
@@ -402,7 +403,7 @@ class _OnboardingStep3 extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<int>(
-            initialValue: provider.selectedInterval, // MUDADO de initialValue para value
+            value: provider.selectedInterval, // MUDADO de initialValue para value
             decoration: const InputDecoration(
               labelText: 'Intervalo de Sincronização',
               prefixIcon: Icon(Icons.timer_outlined),
@@ -426,7 +427,7 @@ class _OnboardingStep3 extends StatelessWidget {
               ),
               const Spacer(),
               ElevatedButton.icon(
-                onPressed: () => provider.saveSettingsAndRestartService(),
+                onPressed: () => provider.saveSettingsAndRestartService(), // CORREÇÃO (Item 12): A lógica está no provider
                 icon: const Icon(Icons.save_outlined),
                 label: const Text('Salvar e Ativar'),
               ),

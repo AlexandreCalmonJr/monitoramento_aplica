@@ -56,7 +56,7 @@ class NetworkMonitor {
   Future<String> _getCurrentBssid() async {
   final result = await Process.run('powershell', [
     '-Command',
-    // ADICIONE O 'r' AQUI TAMBÉM:
+    // CORREÇÃO (Item 2): Adicionado 'r' para string raw
     r'netsh wlan show interfaces | Select-String "BSSID" | ForEach-Object {$_ -replace ".*: ",""}'
   ]);
   return result.stdout.toString().trim();

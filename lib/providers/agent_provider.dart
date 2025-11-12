@@ -1,5 +1,6 @@
 // File: lib/providers/agent_provider.dart
 import 'dart:convert';
+import 'dart:io'; // Importação necessária para 'Platform'
 
 import 'package:agent_windows/models/module_info.dart';
 import 'package:agent_windows/services/auth_service.dart';
@@ -31,6 +32,7 @@ class AgentProvider extends ChangeNotifier {
 
   Future<void> restartService() async {
     _logger.i('Reiniciando o serviço...');
+    _backgroundService.stop(); // CORREÇÃO (Item 8): Para o serviço antes de reiniciar
     await _backgroundService.initialize();
     notifyListeners();
   }
@@ -112,9 +114,8 @@ class AgentProvider extends ChangeNotifier {
     _selectedModuleId = _settingsService.moduleId;
 
     // --- INÍCIO DA ADIÇÃO 2 ---
-    // **IMPORTANTE**: Você precisará adicionar a propriedade 'forceLegacyMode'
-    // ao seu 'SettingsService' (arquivo settings_service.dart) para que isto funcione.
-    // Ex: _forceLegacyMode = _settingsService.forceLegacyMode;
+    // Carrega o modo legado do settingsService
+    _forceLegacyMode = _settingsService.forceLegacyMode;
     // --- FIM DA ADIÇÃO 2 ---
 
     if (_settingsService.ip.isNotEmpty && 
@@ -229,39 +230,13 @@ class AgentProvider extends ChangeNotifier {
     pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
   }
 
-  // --- INÍCIO DA ADIÇÃO 3 ---
-  /// Atualiza a configuração de modo legado e salva
+  // --- CORREÇÃO (Item 9): Atualiza e salva o modo legado (sem duplicidade) ---
   Future<void> updateForceLegacyMode(bool value) async {
     _logger.i('Atualizando modo legado forçado para: $value');
     _forceLegacyMode = value;
 
-    // **IMPORTANTE**: Você precisará adicionar 'newForceLegacyMode'
-    // ao seu método 'saveSettings' no 'SettingsService'.
-    // Esta é uma chamada de exemplo, adapte ao seu SettingsService.
-    /*
-    await _settingsService.saveSettings(
-      newIp: ipController.text,
-      newPort: portController.text,
-      newInterval: _selectedInterval,
-      newModuleId: _selectedModuleId ?? '',
-      newSector: sectorController.text,
-      newFloor: floorController.text,
-      newToken: tokenController.text,
-      newAssetName: assetNameController.text,
-      newForceLegacyMode: _forceLegacyMode, // <--- NOVO PARÂMETRO
-    );
-    */
-    
-    // Salva a configuração específica no SettingsService (método mais simples)
-    // **IMPORTANTE**: Adicione um método `saveForceLegacyMode` no seu SettingsService
-    // Ex:
-    // Future<void> saveForceLegacyMode(bool value) async {
-    //   final prefs = await SharedPreferences.getInstance();
-    //   await prefs.setBool('forceLegacyMode', value);
-    //   forceLegacyMode = value;
-    // }
+    // Salva a configuração específica no SettingsService (método único)
     await _settingsService.saveForceLegacyMode(_forceLegacyMode);
-
 
     // Atualiza o serviço de background
     await _backgroundService.updateSettings({
@@ -270,7 +245,7 @@ class AgentProvider extends ChangeNotifier {
 
     notifyListeners();
   }
-  // --- FIM DA ADIÇÃO 3 ---
+  // --- FIM DA CORREÇÃO ---
 
 
   Future<bool> saveSettingsAndRestartService() async {
@@ -284,6 +259,13 @@ class AgentProvider extends ChangeNotifier {
     try {
       await _authService.saveLegacyToken(tokenController.text);
       
+      // CORREÇÃO (Item 12): Se asset name vazio, preenche com hostname
+      if (assetNameController.text.isEmpty) {
+        assetNameController.text = Platform.environment['COMPUTERNAME'] ?? 'UNKNOWN_PC';
+        _logger.i('Nome do ativo vazio, usando hostname: ${assetNameController.text}');
+      }
+      // FIM DA CORREÇÃO
+      
       await _settingsService.saveSettings(
         newIp: ipController.text,
         newPort: portController.text,
@@ -294,10 +276,6 @@ class AgentProvider extends ChangeNotifier {
         newToken: tokenController.text,
         newAssetName: assetNameController.text,
         newForceLegacyMode: _forceLegacyMode, // <--- ADICIONADO
-        // --- INÍCIO DA ADIÇÃO 4 ---
-        // **IMPORTANTE**: Adicione este parâmetro ao seu saveSettings
-        // newForceLegacyMode: _forceLegacyMode, 
-        // --- FIM DA ADIÇÃO 4 ---
       );
       
       // Salva o modo legado separadamente (RECOMENDADO)
@@ -311,9 +289,7 @@ class AgentProvider extends ChangeNotifier {
         'floor': floorController.text,
         'token': tokenController.text,
         'assetName': assetNameController.text, //
-        // --- INÍCIO DA ADIÇÃO 5 ---
         'forceLegacyMode': _forceLegacyMode,
-        // --- FIM DA ADIÇÃO 5 ---
       });
 
       _status = AgentStatus.configured;

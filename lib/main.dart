@@ -3,8 +3,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:agent_windows/providers/agent_provider.dart';
-// PLACEHOLDER: Estes arquivos serão criados no Passo 3
-// Nós os definimos aqui para o 'HomeScreenRouter' funcionar
 import 'package:agent_windows/screens/onboarding_screen.dart';
 import 'package:agent_windows/screens/status_screen.dart';
 import 'package:agent_windows/services/background_service.dart';
@@ -33,6 +31,22 @@ class MyWindowListener extends WindowListener {
   @override
   void onWindowMinimize() async {
     await windowManager.hide(); // Apenas esconde a janela
+  }
+
+  // CORREÇÃO (Item 22): Adicionar outros eventos úteis para log
+  @override
+  void onWindowFocus() {
+    logger.d('Janela focada');
+  }
+
+  @override
+  void onWindowRestore() {
+    logger.d('Janela restaurada');
+  }
+
+  @override
+  void onWindowMaximize() {
+    logger.d('Janela maximizada');
   }
 }
 // [FIM DA NOVA CLASSE]

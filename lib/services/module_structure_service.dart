@@ -70,7 +70,8 @@ class ModuleStructureService {
   final Logger _logger;
   final AuthService _authService;
 
-  ModuleStructureService(this._logger, this._authService, {required AuthService authService, DebugPrintCallback? logger}) {
+  // CORREÇÃO (Item 1): Construtor simplificado, removendo parâmetros duplicados/conflitantes
+  ModuleStructureService(this._logger, this._authService) {
     _logger.i('ModuleStructureService inicializado');
   }
   

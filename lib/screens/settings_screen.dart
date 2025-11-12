@@ -268,7 +268,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: forceLegacyMode ? Colors.orange : Colors.grey, // Usa o valor do provider
                 ),
               ),
-              activeThumbColor: Colors.orange,
+              activeColor: Colors.orange,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -422,6 +422,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     // --- FIM DA MUDANÇA ---
+    
+    // CORREÇÃO (Item 14): Adicionar validação de formato
+    final ipPattern = RegExp(r'^(\d{1,3}\.){3}\d{1,3}$');
+    if (!ipPattern.hasMatch(agentProvider.ipController.text)) {
+      setState(() {
+        _isDetecting = false;
+        _detectionMessage = 'Erro: Formato de IP inválido.';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_detectionMessage!),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final port = int.tryParse(agentProvider.portController.text);
+    if (port == null || port < 1 || port > 65535) {
+      setState(() {
+        _isDetecting = false;
+        _detectionMessage = 'Erro: Porta inválida (deve ser 1-65535).';
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_detectionMessage!),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    // --- FIM DA CORREÇÃO ---
 
     try {
       final detection = await widget.detectionService.detectActiveSystem(

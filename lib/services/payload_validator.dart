@@ -5,6 +5,7 @@ class PayloadValidator {
     final warnings = <String>[];
 
     // Validações Obrigatórias
+    // CORREÇÃO (Item 5): Validação de serial movida para cá
     if (!_hasValidValue(payload['serial_number'])) {
       errors.add('Serial number inválido ou ausente');
     }
@@ -53,10 +54,18 @@ class PayloadValidator {
   static bool _hasValidValue(dynamic value) {
     if (value == null) return false;
     final str = value.toString().trim();
-    return str.isNotEmpty &&
-        str != 'N/A' &&
-        str.toLowerCase() != 'null' &&
-        !str.contains('000000');
+
+    if (str.isEmpty || str == 'N/A' || str.toLowerCase() == 'null') {
+      return false;
+    }
+
+    // CORREÇÃO (Item 17): Ser mais específico
+    // Só considera inválido se for EXATAMENTE "000000..." ou "00:00:00:..."
+    if (RegExp(r'^(0+|0+:0+:0+.*)$').hasMatch(str)) {
+      return false;
+    }
+
+    return true;
   }
 }
 

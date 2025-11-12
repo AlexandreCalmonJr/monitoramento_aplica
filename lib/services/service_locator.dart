@@ -24,7 +24,11 @@ void setupLocator() {
   
   locator.registerLazySingleton(() => LocalCacheService(locator<Logger>()));
 
-  locator.registerLazySingleton(() => ModuleStructureService(locator<Logger>(), locator<AuthService>(), authService: locator<AuthService>()));
+  // CORREÇÃO (Item 21): Remover parâmetros duplicados
+  locator.registerLazySingleton(() => ModuleStructureService(
+        locator<Logger>(),
+        locator<AuthService>(),
+      ));
   
   // --- INÍCIO DA ADIÇÃO (SERVIÇO QUE FALTAVA) ---
   // Registra o serviço de detecção para que a StatusScreen possa usá-lo

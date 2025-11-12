@@ -241,19 +241,18 @@ class MonitoringService {
       
       if (!validation.isValid) {
         _logger.e('❌ Payload inválido:');
-        for (var e in validation.errors) {
-          _logger.e('   • $e');
-        }
+        validation.errors.forEach((e) => _logger.e('   • $e'));
         throw Exception('Payload inválido: ${validation.errors.join(', ')}');
       }
       
       if (validation.warnings.isNotEmpty) {
         _logger.w('⚠️ Avisos no payload:');
-        for (var w in validation.warnings) {
-          _logger.w('   • $w');
-        }
+        validation.warnings.forEach((w) => _logger.w('   • $w'));
       }
 
+      // CORREÇÃO (Item 5): Lógica de validação de serial removida daqui,
+      // pois foi movida para o PayloadValidator.
+      // A lógica de fallback permanece.
       String serial = (payload['serial_number'] ?? '').toString().trim();
       String assetName = (payload['asset_name'] ?? '').toString().trim();
       String hostname = (payload['hostname'] ?? '').toString().trim();
@@ -371,11 +370,29 @@ class MonitoringService {
       if (detection.systemType == SystemType.legacyTotem) {
         await _sendToLegacySystem(coreInfo, serverUrl, manualSector, manualFloor);
       } else if (detection.systemType == SystemType.newModules) {
-        final effectiveModuleId = detection.primaryModuleId ?? moduleId;
+        // CORREÇÃO (Item 20): Tenta auto-detectar o módulo se nenhum foi salvo
+        var effectiveModuleId = detection.primaryModuleId ?? moduleId;
+        if (effectiveModuleId.isEmpty) {
+          _logger.w('Nenhum módulo salvo/primário. Tentando auto-detecção por tipo de dispositivo...');
+          final deviceType = (coreInfo['is_notebook'] == true) ? 'notebook' : 'desktop';
+          final autoModuleId = await _detectionService.selectModuleForDeviceType(
+            serverUrl: serverUrl,
+            token: token,
+            deviceType: deviceType,
+          );
+          if (autoModuleId != null) {
+            effectiveModuleId = autoModuleId;
+            _logger.i('🎯 Módulo auto-selecionado: $effectiveModuleId');
+          } else {
+            _logger.e('❌ Falha na auto-detecção. É necessário configurar um módulo.');
+            throw Exception('Nenhum módulo configurado ou auto-detectado.');
+          }
+        }
+        
         await _sendToNewSystem(
           coreInfo,
           serverUrl,
-          effectiveModuleId,
+          effectiveModuleId, // Usa o ID efetivo
           token,
           manualSector,
           manualFloor,
@@ -384,9 +401,34 @@ class MonitoringService {
       } else if (detection.systemType == SystemType.both) {
         // Envia para ambos os sistemas
         _logger.i('📊 Enviando para ambos os sistemas...');
-        await _sendToLegacySystem(coreInfo, serverUrl, manualSector, manualFloor);
         
-        final effectiveModuleId = detection.primaryModuleId ?? moduleId;
+        // CORREÇÃO (Item 6): Adicionar try-catch individual
+        try {
+          await _sendToLegacySystem(coreInfo, serverUrl, manualSector, manualFloor);
+        } catch (e) {
+          _logger.w('⚠️ Falha ao enviar para sistema legado (modo both): $e');
+        }
+        
+        // CORREÇÃO (Item 20) - Lógica de auto-detecção duplicada aqui
+        var effectiveModuleId = detection.primaryModuleId ?? moduleId;
+         if (effectiveModuleId.isEmpty) {
+          _logger.w('Nenhum módulo salvo/primário. Tentando auto-detecção por tipo de dispositivo...');
+          final deviceType = (coreInfo['is_notebook'] == true) ? 'notebook' : 'desktop';
+          final autoModuleId = await _detectionService.selectModuleForDeviceType(
+            serverUrl: serverUrl,
+            token: token,
+            deviceType: deviceType,
+          );
+          if (autoModuleId != null) {
+            effectiveModuleId = autoModuleId;
+            _logger.i('🎯 Módulo auto-selecionado: $effectiveModuleId');
+          } else {
+             _logger.e('❌ Falha na auto-detecção (modo both).');
+             // Não lança exceção, pois o legado pode ter funcionado
+             return;
+          }
+        }
+        
         await _sendToNewSystem(
           coreInfo,
           serverUrl,

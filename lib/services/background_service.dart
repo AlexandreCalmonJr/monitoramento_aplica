@@ -91,12 +91,16 @@ class BackgroundService {
   }
 
   Future<void> runCycle() async {
-    if (_currentSettings == null) {
-      _logger.w('⚠️  Background Service: Configurações ausentes');
-      lastRunStatus = "Erro: Config ausente";
+    // CORREÇÃO (Item 3): Adicionar verificação de token no início do ciclo
+    if (_currentSettings == null ||
+        _currentSettings!['token'] == null ||
+        _currentSettings!['token'].toString().isEmpty) {
+      _logger.e('❌ Token ausente. Não é possível executar ciclo.');
+      lastRunStatus = "Erro: Token ausente";
       errorCount++;
       return;
     }
+    // FIM DA CORREÇÃO
 
     // Atualiza o horário da próxima execução (para a UI)
     final interval = _currentSettings!['interval'] as int? ?? 300;
@@ -172,19 +176,28 @@ final forceLegacyMode = _currentSettings!['forceLegacyMode'] as bool? ?? false;
   }
 
   // --- MÉTODO AUXILIAR ADICIONADO ---
+  // CORREÇÃO (Item 4): Usar Timer simples em vez de Timer.periodic
   void _scheduleNextRun(int intervalSeconds) {
     _logger.i('   Agendando próximo ciclo em $intervalSeconds segundos');
     
     // Atualiza a UI
     nextRunTime = DateTime.now().add(Duration(seconds: intervalSeconds));
 
-    _timer = Timer.periodic(Duration(seconds: intervalSeconds), (timer) {
+    // Usa Timer simples
+    _timer = Timer(Duration(seconds: intervalSeconds), () async {
+      if (!_isRunning) {
+        _logger.w('Timer disparado, mas serviço está parado.');
+        return;
+      }
+
+      _logger.d('Timer disparado, executando ciclo...');
+      await runCycle(); // ✅ Aguarda ciclo terminar
+
+      // Reagendar próximo ciclo
       if (_isRunning) {
-        _logger.d('Timer disparado, executando ciclo...');
-        runCycle(); // Não precisa de await aqui, o timer cuida do loop
-      } else {
-        _logger.w('Timer disparado, mas serviço está parado. Cancelando timer.');
-        timer.cancel();
+        // Pega o intervalo *atualizado* caso tenha mudado
+        final currentInterval = _currentSettings!['interval'] as int? ?? intervalSeconds;
+        _scheduleNextRun(currentInterval);
       }
     });
   }

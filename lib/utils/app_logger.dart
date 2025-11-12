@@ -25,13 +25,16 @@ class AppLogger {
       final dir = await getApplicationDocumentsDirectory();
       _logFile = File('${dir.path}/agent_windows.log');
       
-      if (!await _logFile.exists()) {
-        await _logFile.create();
-      }
+      // CORREÇÃO (Item 15): Testa a escrita
+      await _logFile.writeAsString('--- Log inicializado em ${DateTime.now()} ---\n', mode: FileMode.append);
       
       outputs.add(FileOutput(file: _logFile));
       outputs.add(MemoryOutput(logHistory, maxLogEntries));
       
+    } on FileSystemException catch (e) {
+      debugPrint('Sem permissão para criar log: $e');
+      // Continua só com memória
+      outputs.add(MemoryOutput(logHistory, maxLogEntries));
     } catch (e) {
       debugPrint('Erro ao inicializar logger de arquivo: $e');
       outputs.add(MemoryOutput(logHistory, maxLogEntries));
