@@ -268,7 +268,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   color: forceLegacyMode ? Colors.orange : Colors.grey, // Usa o valor do provider
                 ),
               ),
-              activeColor: Colors.orange,
+              activeThumbColor: Colors.orange,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),

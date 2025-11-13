@@ -249,13 +249,17 @@ class MonitoringService {
 
       if (!validation.isValid) {
         _logger.e('❌ Payload inválido:');
-        validation.errors.forEach((e) => _logger.e('   • $e'));
+        for (var e in validation.errors) {
+          _logger.e('   • $e');
+        }
         throw Exception('Payload inválido: ${validation.errors.join(', ')}');
       }
 
       if (validation.warnings.isNotEmpty) {
         _logger.w('⚠️ Avisos no payload:');
-        validation.warnings.forEach((w) => _logger.w('   • $w'));
+        for (var w in validation.warnings) {
+          _logger.w('   • $w');
+        }
       }
 
       // CORREÇÃO (Item 5): Lógica de validação de serial removida daqui,
@@ -391,19 +395,23 @@ class MonitoringService {
         await _sendToLegacySystem(
             coreInfo, serverUrl, token, manualSector!, manualFloor);
       } else if (detection.systemType == SystemType.newModules) {
-        // CORREÇÃO (Item 20): Tenta auto-detectar o módulo se nenhum foi salvo
-        var effectiveModuleId = detection.primaryModuleId ?? moduleId;
+        // ✅ CORREÇÃO CRÍTICA: Prioriza o módulo SALVO pelo usuário
+        String effectiveModuleId = moduleId; // <-- MUDANÇA AQUI
+
+        // ✅ Só usa auto-detecção se NÃO houver módulo salvo
         if (effectiveModuleId.isEmpty) {
-          _logger.w(
-              'Nenhum módulo salvo/primário. Tentando auto-detecção por tipo de dispositivo...');
+          _logger.w('⚠️ Nenhum módulo configurado. Tentando auto-detecção...');
+
           final deviceType =
               (coreInfo['is_notebook'] == true) ? 'notebook' : 'desktop';
+
           final autoModuleId =
               await _detectionService.selectModuleForDeviceType(
             serverUrl: serverUrl,
             token: token,
             deviceType: deviceType,
           );
+
           if (autoModuleId != null) {
             effectiveModuleId = autoModuleId;
             _logger.i('🎯 Módulo auto-selecionado: $effectiveModuleId');
@@ -412,50 +420,61 @@ class MonitoringService {
                 '❌ Falha na auto-detecção. É necessário configurar um módulo.');
             throw Exception('Nenhum módulo configurado ou auto-detectado.');
           }
+        } else {
+          // ✅ LOG quando usa o módulo salvo
+          _logger.i(
+              '✅ Usando módulo configurado pelo usuário: $effectiveModuleId');
         }
 
         await _sendToNewSystem(
           coreInfo,
           serverUrl,
-          effectiveModuleId, // Usa o ID efetivo
+          effectiveModuleId, // <-- Usa o ID correto
           token,
           manualSector,
           manualFloor,
           manualAssetName,
         );
       } else if (detection.systemType == SystemType.both) {
-        // Envia para ambos os sistemas
+        // ✅ Envia para ambos os sistemas
         _logger.i('📊 Enviando para ambos os sistemas...');
 
-        // CORREÇÃO (Item 6): Adicionar try-catch individual
+        // Sistema Legado
         try {
           await _sendToLegacySystem(
-              coreInfo, serverUrl, manualSector!, manualFloor!, token);
+              coreInfo, serverUrl, token, manualSector!, manualFloor!);
         } catch (e) {
-          _logger.w('⚠️ Falha ao enviar para sistema legado (modo both): $e');
+          _logger.w('⚠️ Falha ao enviar para sistema legado: $e');
         }
 
-        // CORREÇÃO (Item 20) - Lógica de auto-detecção duplicada aqui
-        var effectiveModuleId = detection.primaryModuleId ?? moduleId;
+        // Sistema Novo (COM CORREÇÃO)
+        String effectiveModuleId = moduleId; // <-- MUDANÇA AQUI TAMBÉM
+
         if (effectiveModuleId.isEmpty) {
           _logger.w(
-              'Nenhum módulo salvo/primário. Tentando auto-detecção por tipo de dispositivo...');
+              '⚠️ Nenhum módulo configurado (modo both). Tentando auto-detecção...');
+
           final deviceType =
               (coreInfo['is_notebook'] == true) ? 'notebook' : 'desktop';
+
           final autoModuleId =
               await _detectionService.selectModuleForDeviceType(
             serverUrl: serverUrl,
             token: token,
             deviceType: deviceType,
           );
+
           if (autoModuleId != null) {
             effectiveModuleId = autoModuleId;
-            _logger.i('🎯 Módulo auto-selecionado: $effectiveModuleId');
+            _logger.i(
+                '🎯 Módulo auto-selecionado (modo both): $effectiveModuleId');
           } else {
             _logger.e('❌ Falha na auto-detecção (modo both).');
-            // Não lança exceção, pois o legado pode ter funcionado
-            return;
+            return; // Não lança exceção, pois o legado pode ter funcionado
           }
+        } else {
+          _logger
+              .i('✅ Usando módulo configurado (modo both): $effectiveModuleId');
         }
 
         await _sendToNewSystem(
