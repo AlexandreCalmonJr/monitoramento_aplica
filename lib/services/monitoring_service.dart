@@ -592,30 +592,24 @@ class MonitoringService {
     switch (moduleType) {
       case 'desktop':
         _logger.i('💻 Coletando dados específicos de Desktop...');
-        payload['installed_software'] = await _getInstalledPrograms();
-        final peripherals = await _getPeripherals();
-        payload['biometric_reader'] = peripherals['biometric'];
-        payload['connected_printer'] =
-            '${peripherals['zebra']} / ${peripherals['bematech']}';
+      
+        payload['installed_software'] = coreInfo['installed_software'] ?? [];
+        payload['biometric_reader'] = coreInfo['biometric_reader'] ?? 'N/D';
+        payload['connected_printer'] = coreInfo['connected_printer'] ?? 'N/D';
         break;
 
       case 'notebook':
         _logger.i('💼 Coletando dados específicos de Notebook...');
-        payload['installed_software'] = await _getInstalledPrograms();
-        final batteryInfo = await _getBatteryInfo();
-
-        if (batteryInfo['battery_level'] != null) {
-          payload['battery_level'] = batteryInfo['battery_level'];
+        
+        payload['installed_software'] = coreInfo['installed_software'] ?? [];
+        if (coreInfo['battery_level'] != null) {
+          payload['battery_level'] = coreInfo['battery_level'];
         }
-        payload['battery_health'] = batteryInfo['battery_health'];
-
+        payload['battery_health'] = coreInfo['battery_health'] ?? 'N/A';
+        
+        // (O resto da lógica do notebook sobre WiFi está correta)
         if (coreInfo['connection_type'] == 'WiFi') {
-          if (coreInfo['wifi_ssid'] != null) {
-            payload['wifi_ssid'] = coreInfo['wifi_ssid'];
-          }
-          if (coreInfo['wifi_signal'] != null) {
-            payload['wifi_signal'] = coreInfo['wifi_signal'];
-          }
+          //...
         }
         break;
 

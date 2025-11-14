@@ -1,4 +1,4 @@
-// File: lib/background_service.dart
+// File: lib/services/background_service.dart
 import 'dart:async';
 
 import 'package:agent_windows/services/monitoring_service.dart';
@@ -35,6 +35,7 @@ class BackgroundService {
         _settingsService.ip.isNotEmpty && 
         _settingsService.port.isNotEmpty &&
         _settingsService.token.isNotEmpty) {
+      // ✅ CORREÇÃO: Usar 'await' aqui é bom para a inicialização
       await start();
     } else {
       _logger.w('⚠️  Background Service: Aguardando configuração inicial');
@@ -67,8 +68,8 @@ class BackgroundService {
       'sector': _settingsService.sector,
       'floor': _settingsService.floor,
       'token': _settingsService.token,
-      'assetName': _settingsService.assetName,
-      'forceLegacyMode': _settingsService.forceLegacyMode, // <-- ADICIONE ESTA LINHA
+      'assetName': _settingsService.assetName, 
+      'forceLegacyMode': _settingsService.forceLegacyMode,
     };
 
     _isRunning = true;
@@ -78,20 +79,16 @@ class BackgroundService {
     _logger.i('   Servidor: ${_currentSettings!['serverUrl']}');
     _logger.i('   Intervalo: ${_settingsService.interval}s');
     
-    // --- INÍCIO DA CORREÇÃO DO TIMER ---
-    // Cancela qualquer timer antigo
     _timer?.cancel();
 
-    // Executa o primeiro ciclo imediatamente
-    await runCycle(); 
+    // ✅ CORREÇÃO 1: REMOVIDO 'await' DAQUI
+    // Isso executa o ciclo em segundo plano e libera a UI
+    runCycle(); 
     
-    // Agenda os ciclos futuros
     _scheduleNextRun(_settingsService.interval);
-    // --- FIM DA CORREÇÃO DO TIMER ---
   }
 
   Future<void> runCycle() async {
-    // CORREÇÃO (Item 3): Adicionar verificação de token no início do ciclo
     if (_currentSettings == null ||
         _currentSettings!['token'] == null ||
         _currentSettings!['token'].toString().isEmpty) {
@@ -100,9 +97,7 @@ class BackgroundService {
       errorCount++;
       return;
     }
-    // FIM DA CORREÇÃO
 
-    // Atualiza o horário da próxima execução (para a UI)
     final interval = _currentSettings!['interval'] as int? ?? 300;
     nextRunTime = DateTime.now().add(Duration(seconds: interval));
 
@@ -112,9 +107,7 @@ class BackgroundService {
     final floor = _currentSettings!['floor'] as String?;
     final token = _currentSettings!['token'] as String?;
     final assetName = _currentSettings!['assetName'] as String?; 
-    
-    // --- ADIÇÃO DA LEITURA DO MODO LEGADO ---
-final forceLegacyMode = _currentSettings!['forceLegacyMode'] as bool? ?? false;
+    final forceLegacyMode = _currentSettings!['forceLegacyMode'] as bool? ?? false;
 
     if (moduleId == null || moduleId.isEmpty || 
         serverUrl == null || serverUrl.isEmpty ||
@@ -136,7 +129,7 @@ final forceLegacyMode = _currentSettings!['forceLegacyMode'] as bool? ?? false;
         manualFloor: floor,
         token: token,
         manualAssetName: assetName,
-        forceLegacyMode: forceLegacyMode, // <-- ADICIONE ESTE PARÂMETRO
+        forceLegacyMode: forceLegacyMode,
       );
       
       _logger.i('✅ CICLO CONCLUÍDO COM SUCESSO');
@@ -154,36 +147,26 @@ final forceLegacyMode = _currentSettings!['forceLegacyMode'] as bool? ?? false;
   Future<void> updateSettings(Map<String, dynamic> newSettings) async {
     _logger.i('🔄 Background Service: Atualizando configurações');
     
-    // --- INÍCIO DA CORREÇÃO DO BUG 1 ---
-    // Garante que _currentSettings não seja nulo
     _currentSettings ??= {};
-    
-    // Mescla as novas configurações com as existentes, em vez de substituir
     _currentSettings!.addAll(newSettings);
-    // --- FIM DA CORREÇÃO DO BUG 1 ---
     
-    // Cancela o timer antigo
     _timer?.cancel();
     
     _logger.i('⚡ Executando ciclo imediato com novas configurações...');
-    await runCycle(); // Executa 1x com as novas configs
+    
+    // ✅ CORREÇÃO 2: REMOVIDO 'await' DAQUI
+    // Isso torna o salvamento nas configurações instantâneo
+    runCycle(); 
 
-    // --- INÍCIO DA CORREÇÃO DO TIMER 2 ---
-    // Reagenda o timer com o novo intervalo (se houver)
     final intervalSeconds = _currentSettings!['interval'] as int? ?? _settingsService.interval;
     _scheduleNextRun(intervalSeconds);
-    // --- FIM DA CORREÇÃO DO TIMER 2 ---
   }
 
-  // --- MÉTODO AUXILIAR ADICIONADO ---
-  // CORREÇÃO (Item 4): Usar Timer simples em vez de Timer.periodic
   void _scheduleNextRun(int intervalSeconds) {
     _logger.i('   Agendando próximo ciclo em $intervalSeconds segundos');
     
-    // Atualiza a UI
     nextRunTime = DateTime.now().add(Duration(seconds: intervalSeconds));
 
-    // Usa Timer simples
     _timer = Timer(Duration(seconds: intervalSeconds), () async {
       if (!_isRunning) {
         _logger.w('Timer disparado, mas serviço está parado.');
@@ -191,17 +174,14 @@ final forceLegacyMode = _currentSettings!['forceLegacyMode'] as bool? ?? false;
       }
 
       _logger.d('Timer disparado, executando ciclo...');
-      await runCycle(); // ✅ Aguarda ciclo terminar
+      await runCycle(); 
 
-      // Reagendar próximo ciclo
       if (_isRunning) {
-        // Pega o intervalo *atualizado* caso tenha mudado
         final currentInterval = _currentSettings!['interval'] as int? ?? intervalSeconds;
         _scheduleNextRun(currentInterval);
       }
     });
   }
-  // --- FIM DO MÉTODO AUXILIAR ---
 
   void stop() {
     _timer?.cancel();
