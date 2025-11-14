@@ -104,8 +104,6 @@ class MonitoringService {
     }
   }
 
-  // === MÉTODOS DE COLETA (mantidos do original) ===
-
   Future<Map<String, dynamic>> _getCoreSystemInfo() async {
     final stdoutString = await _runScript('get_core_system_info.ps1');
 
@@ -123,6 +121,7 @@ class MonitoringService {
         return decodedJson;
       } catch (e) {
         _logger.e('Erro ao decodificar JSON do get_core_system_info.ps1: $e');
+        _logger.e('Saída recebida: $stdoutString'); // Log da saída real
         return {};
       }
     }
@@ -150,72 +149,6 @@ class MonitoringService {
       _logger.e('❌ Erro ao coletar BSSID manualmente: $e');
     }
     return 'N/A';
-  }
-
-  Future<List<String>> _getInstalledPrograms() async {
-    _logger.i("--- Iniciando coleta de programas ---");
-    try {
-      final result = await _runScript('get_installed_programs.ps1');
-      if (result.isNotEmpty && !result.startsWith("Erro")) {
-        final programs =
-            result.split('\n').where((s) => s.trim().isNotEmpty).toList();
-        _logger.i("✅ ${programs.length} programas encontrados");
-        return programs;
-      }
-    } catch (e) {
-      _logger.e("❌ Erro ao coletar programas: $e");
-    }
-    return [];
-  }
-
-  Future<Map<String, dynamic>> _getBatteryInfo() async {
-    try {
-      final result = await _runScript('get_battery_info.ps1');
-
-      if (result.contains(';')) {
-        final parts = result.split(';');
-        _logger.i('✅ Informações da bateria coletadas');
-        return {
-          'battery_level': int.tryParse(parts[0]),
-          'battery_health': parts[1],
-        };
-      }
-    } catch (e) {
-      _logger.e("Erro ao coletar informação da bateria: $e");
-    }
-    return {'battery_level': null, 'battery_health': 'N/A'};
-  }
-
-  Future<Map<String, String>> _getPeripherals() async {
-    _logger.i("--- Iniciando coleta de periféricos ---");
-    try {
-      final stdoutString = await _runScript('get_peripherals.ps1');
-
-      Map<String, String> devices = {
-        'zebra': 'Não detectado',
-        'bematech': 'Não detectado',
-        'biometric': 'Não detectado'
-      };
-
-      final lines = stdoutString.split('\n');
-      for (String line in lines) {
-        final trimmedLine = line.trim();
-        if (trimmedLine.startsWith('ZEBRA:')) {
-          devices['zebra'] = trimmedLine.substring('ZEBRA:'.length).trim();
-        } else if (trimmedLine.startsWith('BEMATECH:')) {
-          devices['bematech'] =
-              trimmedLine.substring('BEMATECH:'.length).trim();
-        } else if (trimmedLine.startsWith('BIOMETRIC:')) {
-          devices['biometric'] =
-              trimmedLine.substring('BIOMETRIC:'.length).trim();
-        }
-      }
-      _logger.i('✅ Periféricos verificados');
-      return devices;
-    } catch (e) {
-      _logger.e("❌ Erro ao detectar periféricos: $e");
-      return {'zebra': 'Erro', 'bematech': 'Erro', 'biometric': 'Erro'};
-    }
   }
 
   Future<List<Map<String, dynamic>>> _getPrintersInfo() async {
@@ -344,13 +277,13 @@ class MonitoringService {
   // === MÉTODO PRINCIPAL COM DETECÇÃO AUTOMÁTICA ===
 
   Future<void> collectAndSendData({
-    required String moduleId,
+    required String moduleId, // ID do módulo salvo (pode estar vazio)
     required String serverUrl,
     required String token,
     String? manualSector,
     String? manualFloor,
     String? manualAssetName,
-    bool? forceLegacyMode, // Novo: Força modo legado se true
+    bool? forceLegacyMode, // O valor do checkbox
   }) async {
     if (serverUrl.isEmpty || token.isEmpty) {
       _logger.w('❌ Configurações incompletas. Abortando envio.');
@@ -358,30 +291,11 @@ class MonitoringService {
     }
 
     await _cacheService.syncCachedData(serverUrl, token);
-
     _logger.i('🔄 INICIANDO CICLO DE MONITORAMENTO');
 
     try {
       await _authService.refreshTokenIfNeeded(serverUrl: serverUrl);
 
-      // 🆕 DETECÇÃO AUTOMÁTICA DO SISTEMA
-      ModuleDetectionResult detection;
-
-      if (forceLegacyMode == true) {
-        _logger.i('🔧 Modo legado forçado manualmente');
-        detection = ModuleDetectionResult(
-          systemType: SystemType.legacyTotem,
-          hasNewModules: false,
-          hasLegacyTotem: true,
-        );
-      } else {
-        detection = await _detectionService.detectActiveSystem(
-          serverUrl: serverUrl,
-          token: token,
-        );
-      }
-
-      // Coleta informações do sistema
       _logger.i('Coletando dados do host (PC)...');
       Map<String, dynamic> coreInfo = await _getCoreSystemInfo();
 
@@ -390,103 +304,61 @@ class MonitoringService {
         throw Exception('Não foi possível obter informações do sistema');
       }
 
-      // 🆕 ROTEAMENTO BASEADO NO SISTEMA DETECTADO
-      if (detection.systemType == SystemType.legacyTotem) {
+      final bool isNotebook = coreInfo['is_notebook'] == true;
+      final String deviceType = isNotebook ? 'notebook' : 'desktop';
+      _logger.i('Tipo de dispositivo detectado: $deviceType');
+
+      // --- ✅ LÓGICA DE DECISÃO BINÁRIA (Sem Híbrido) ---
+
+      // 1. O Modo Legado está forçado E o dispositivo NÃO é um notebook?
+      if (forceLegacyMode == true && !isNotebook) {
+        _logger.i(
+            '🔧 Modo legado forçado (Desktop/Totem). Enviando APENAS para /api/monitor.');
         await _sendToLegacySystem(
-            coreInfo, serverUrl, token, manualSector!, manualFloor);
-      } else if (detection.systemType == SystemType.newModules) {
-        // ✅ CORREÇÃO CRÍTICA: Prioriza o módulo SALVO pelo usuário
-        String effectiveModuleId = moduleId; // <-- MUDANÇA AQUI
+            coreInfo, serverUrl, token, manualSector ?? '', manualFloor ?? '');
 
-        // ✅ Só usa auto-detecção se NÃO houver módulo salvo
-        if (effectiveModuleId.isEmpty) {
-          _logger.w('⚠️ Nenhum módulo configurado. Tentando auto-detecção...');
-
-          final deviceType =
-              (coreInfo['is_notebook'] == true) ? 'notebook' : 'desktop';
-
-          final autoModuleId =
-              await _detectionService.selectModuleForDeviceType(
-            serverUrl: serverUrl,
-            token: token,
-            deviceType: deviceType,
-          );
-
-          if (autoModuleId != null) {
-            effectiveModuleId = autoModuleId;
-            _logger.i('🎯 Módulo auto-selecionado: $effectiveModuleId');
-          } else {
-            _logger.e(
-                '❌ Falha na auto-detecção. É necessário configurar um módulo.');
-            throw Exception('Nenhum módulo configurado ou auto-detectado.');
-          }
-        } else {
-          // ✅ LOG quando usa o módulo salvo
-          _logger.i(
-              '✅ Usando módulo configurado pelo usuário: $effectiveModuleId');
-        }
-
-        await _sendToNewSystem(
-          coreInfo,
-          serverUrl,
-          effectiveModuleId, // <-- Usa o ID correto
-          token,
-          manualSector,
-          manualFloor,
-          manualAssetName,
-        );
-      } else if (detection.systemType == SystemType.both) {
-        // ✅ Envia para ambos os sistemas
-        _logger.i('📊 Enviando para ambos os sistemas...');
-
-        // Sistema Legado
-        try {
-          await _sendToLegacySystem(
-              coreInfo, serverUrl, token, manualSector!, manualFloor!);
-        } catch (e) {
-          _logger.w('⚠️ Falha ao enviar para sistema legado: $e');
-        }
-
-        // Sistema Novo (COM CORREÇÃO)
-        String effectiveModuleId = moduleId; // <-- MUDANÇA AQUI TAMBÉM
-
-        if (effectiveModuleId.isEmpty) {
-          _logger.w(
-              '⚠️ Nenhum módulo configurado (modo both). Tentando auto-detecção...');
-
-          final deviceType =
-              (coreInfo['is_notebook'] == true) ? 'notebook' : 'desktop';
-
-          final autoModuleId =
-              await _detectionService.selectModuleForDeviceType(
-            serverUrl: serverUrl,
-            token: token,
-            deviceType: deviceType,
-          );
-
-          if (autoModuleId != null) {
-            effectiveModuleId = autoModuleId;
-            _logger.i(
-                '🎯 Módulo auto-selecionado (modo both): $effectiveModuleId');
-          } else {
-            _logger.e('❌ Falha na auto-detecção (modo both).');
-            return; // Não lança exceção, pois o legado pode ter funcionado
-          }
-        } else {
-          _logger
-              .i('✅ Usando módulo configurado (modo both): $effectiveModuleId');
-        }
-
-        await _sendToNewSystem(
-          coreInfo,
-          serverUrl,
-          effectiveModuleId,
-          token,
-          manualSector,
-          manualFloor,
-          manualAssetName,
-        );
+        // Esta é a correção: para de executar e não tenta enviar para os módulos.
+        _consecutiveErrors = 0;
+        _logger.i('✅ CICLO (LEGADO) CONCLUÍDO\n');
+        return; // <-- PARA A EXECUÇÃO AQUI
       }
+
+      // 2. Se a condição acima for falsa (é notebook OU não está forçado)
+      //    trata como um envio normal para o Sistema de Módulos.
+      _logger.i('Executando envio para Sistema de Módulos...');
+      String effectiveModuleId = moduleId; // Usa o ID salvo
+
+      if (effectiveModuleId.isEmpty) {
+        _logger.w('⚠️ Nenhum módulo configurado. Tentando auto-detecção...');
+        final autoModuleId = await _detectionService.selectModuleForDeviceType(
+          serverUrl: serverUrl,
+          token: token,
+          deviceType: deviceType,
+        );
+
+        if (autoModuleId != null) {
+          effectiveModuleId = autoModuleId;
+          _logger.i('🎯 Módulo auto-selecionado: $effectiveModuleId');
+        } else {
+          _logger.e(
+              '❌ Falha na auto-detecção. É necessário configurar um módulo.');
+          throw Exception('Nenhum módulo configurado ou auto-detectado.');
+        }
+      } else {
+        _logger
+            .i('✅ Usando módulo configurado pelo usuário: $effectiveModuleId');
+      }
+
+      // Envia os dados para o módulo novo
+      await _sendToNewSystem(
+        coreInfo,
+        serverUrl,
+        effectiveModuleId,
+        token,
+        manualSector,
+        manualFloor,
+        manualAssetName,
+      );
 
       _consecutiveErrors = 0;
     } catch (e) {
@@ -506,33 +378,26 @@ class MonitoringService {
       rethrow;
     }
 
-    _logger.i('✅ CICLO DE MONITORAMENTO CONCLUÍDO\n');
+    _logger.i('✅ CICLO (MÓDULOS) CONCLUÍDO\n');
   }
 
-  // 🆕 ENVIO PARA SISTEMA LEGADO
-  // File: lib/services/monitoring_service.dart (linha ~230)
-
-// 🆕 ENVIO PARA SISTEMA LEGADO
+  // --- ENVIO PARA SISTEMA LEGADO (CORRIGIDO) ---
   Future<void> _sendToLegacySystem(
     Map<String, dynamic> coreInfo,
     String serverUrl,
-    String token, // ⬅️ ADICIONADO
-    String? sector,
-    String? floor,
+    String token,
+    String sector,
+    String floor,
   ) async {
-    _logger.i('📡 Enviando para sistema LEGADO de Totem...');
+    _logger.i('📡 Enviando para sistema LEGADO de Totem (/api/monitor)...');
 
-    // Adiciona periféricos se for um totem
-    final peripherals = await _getPeripherals();
-    coreInfo['biometric_reader'] = peripherals['biometric'];
-    coreInfo['connected_printer'] =
-        '${peripherals['zebra']} / ${peripherals['bematech']}';
-    coreInfo['installed_software'] = await _getInstalledPrograms();
+    // ✅ CORREÇÃO: Não chama mais scripts antigos
+    // Os dados (periféricos, programas) já estão em coreInfo
 
     final success = await _legacyTotemService.sendTotemData(
       serverUrl: serverUrl,
-      systemInfo: coreInfo,
-      token: token, // ⬅️ PASSANDO O TOKEN
+      systemInfo: coreInfo, // Passa o coreInfo completo
+      token: token,
       sector: sector,
       floor: floor,
     );
@@ -544,7 +409,7 @@ class MonitoringService {
     }
   }
 
-  // 🆕 ENVIO PARA SISTEMA NOVO
+  // --- ENVIO PARA SISTEMA NOVO (CORRIGIDO) ---
   Future<void> _sendToNewSystem(
     Map<String, dynamic> coreInfo,
     String serverUrl,
@@ -554,7 +419,7 @@ class MonitoringService {
     String? floor,
     String? assetName,
   ) async {
-    _logger.i('📡 Enviando para sistema NOVO de módulos...');
+    _logger.i('📡 Enviando para sistema NOVO de módulos (/api/modules)...');
     _logger.d('📋 Módulo: $moduleId');
 
     final structure = await _moduleStructureService.fetchModuleStructure(
@@ -587,44 +452,24 @@ class MonitoringService {
       payload['asset_name'] = assetName;
     }
 
-    payload['assigned_to'] = await _runCommand('whoami', []);
+    // ✅ CORREÇÃO: 'current_user' já vem do coreInfo
+    // payload['assigned_to'] = await _runCommand('whoami', []);
 
+    // Remove dados desnecessários dependendo do tipo
     switch (moduleType) {
       case 'desktop':
-        _logger.i('💻 Coletando dados específicos de Desktop...');
-      
-        payload['installed_software'] = coreInfo['installed_software'] ?? [];
-        payload['biometric_reader'] = coreInfo['biometric_reader'] ?? 'N/D';
-        payload['connected_printer'] = coreInfo['connected_printer'] ?? 'N/D';
+        _logger.i('💻 Preparando dados de Desktop...');
+        payload.remove('battery_level');
+        payload.remove('battery_health');
         break;
 
       case 'notebook':
-        _logger.i('💼 Coletando dados específicos de Notebook...');
-        
-        payload['installed_software'] = coreInfo['installed_software'] ?? [];
-        if (coreInfo['battery_level'] != null) {
-          payload['battery_level'] = coreInfo['battery_level'];
-        }
-        payload['battery_health'] = coreInfo['battery_health'] ?? 'N/A';
-        
-        // (O resto da lógica do notebook sobre WiFi está correta)
-        if (coreInfo['connection_type'] == 'WiFi') {
-          //...
-        }
+        _logger.i('💼 Preparando dados de Notebook...');
+        payload.remove('biometric_reader');
+        payload.remove('connected_printer');
         break;
 
-      case 'panel':
-        _logger.i('📺 Coletando dados de Panel...');
-        payload.addAll({
-          'is_online': true,
-          'screen_size': 'N/A',
-          'resolution': 'N/A',
-          'firmware_version': 'N/A',
-        });
-        break;
-
-      default:
-        _logger.i('📦 Módulo customizado: enviando apenas dados base');
+      // ... (outros cases) ...
     }
 
     if (!_moduleStructureService.validateData(payload, structure.type)) {

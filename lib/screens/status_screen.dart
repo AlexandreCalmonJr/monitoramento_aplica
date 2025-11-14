@@ -1,6 +1,6 @@
 // File: lib/screens/status_screen.dart (REVISADO)
 import 'dart:async';
-import 'dart:convert'; 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:agent_windows/providers/agent_provider.dart';
@@ -11,10 +11,10 @@ import 'package:agent_windows/services/service_locator.dart';
 import 'package:agent_windows/utils/app_logger.dart';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle; 
-import 'package:intl/intl.dart'; 
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
-import 'package:path/path.dart' as p; 
+import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 
 class StatusScreen extends StatefulWidget {
@@ -38,7 +38,7 @@ class _StatusScreenState extends State<StatusScreen> {
 
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) {
-        setState(() {}); 
+        setState(() {});
       }
     });
   }
@@ -65,10 +65,10 @@ class _StatusScreenState extends State<StatusScreen> {
     if (dt == null) return "N/A";
     final diff = dt.difference(DateTime.now());
     if (diff.isNegative) return "Agora...";
-    
+
     // Evita mostrar minutos negativos se estiver atrasado
     if (diff.inSeconds < 0) return "Agora...";
-    
+
     final minutes = diff.inMinutes;
     final seconds = diff.inSeconds.remainder(60);
     return "Em ${minutes}m ${seconds}s";
@@ -197,14 +197,16 @@ class _StatusScreenState extends State<StatusScreen> {
   }
 
   Future<Map<String, String>> _getNetworkInfo() async {
-    final scriptName = 'get_core_system_info_${DateTime.now().millisecondsSinceEpoch}.ps1';
+    final scriptName =
+        'get_core_system_info_${DateTime.now().millisecondsSinceEpoch}.ps1';
     final tempDir = Directory.systemTemp;
     final scriptFile = File(p.join(tempDir.path, scriptName));
 
     try {
-      final scriptContent =
-          await rootBundle.loadString('assets/scripts/get_core_system_info.ps1');
-      await scriptFile.writeAsString(scriptContent, flush: true, encoding: utf8);
+      final scriptContent = await rootBundle
+          .loadString('assets/scripts/get_core_system_info.ps1');
+      await scriptFile.writeAsString(scriptContent,
+          flush: true, encoding: utf8);
 
       final result = await Process.run(
         'powershell',
@@ -216,7 +218,8 @@ class _StatusScreenState extends State<StatusScreen> {
       final stderrString = _decodeOutput(result.stderr);
 
       if (result.exitCode != 0) {
-        _logger.e('Erro no script: $stderrString (Arquivo: ${scriptFile.path})');
+        _logger
+            .e('Erro no script: $stderrString (Arquivo: ${scriptFile.path})');
         throw Exception('Erro no script: $stderrString');
       }
 
@@ -254,18 +257,6 @@ class _StatusScreenState extends State<StatusScreen> {
         _logger.w('Falha ao deletar script temporário: ${scriptFile.path}, $e');
       }
     }
-  }
-
-  void _openSettings(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => SettingsScreen(
-          logger: locator<Logger>(),
-          detectionService: locator<ModuleDetectionService>(),
-        ),
-      ),
-    );
   }
 
   @override
@@ -315,12 +306,13 @@ class _StatusScreenState extends State<StatusScreen> {
                                   theme: theme,
                                   title: 'Configuração de Conexão',
                                   icon: Icons.dns_outlined,
-                                  content: _buildConnectionConfig(provider, serverUrl, moduleName),
+                                  content: _buildConnectionConfig(
+                                      provider, serverUrl, moduleName),
                                 ),
                               ],
                             ),
                           ),
-                          
+
                           const SizedBox(width: 16),
 
                           // Coluna 2: Rede e Logs
@@ -329,18 +321,19 @@ class _StatusScreenState extends State<StatusScreen> {
                             child: Column(
                               children: [
                                 _buildStatusCard(
-                                  theme: theme,
-                                  title: 'Informações de Rede',
-                                  icon: Icons.wifi,
-                                  content: _buildNetworkInfo(),
-                                  trailing: IconButton( // Botão de refresh
-                                    icon: const Icon(Icons.refresh, size: 18, color: Colors.grey),
-                                    onPressed: _refreshNetworkInfo,
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    tooltip: 'Atualizar informações de rede',
-                                  )
-                                ),
+                                    theme: theme,
+                                    title: 'Informações de Rede',
+                                    icon: Icons.wifi,
+                                    content: _buildNetworkInfo(),
+                                    trailing: IconButton(
+                                      // Botão de refresh
+                                      icon: const Icon(Icons.refresh,
+                                          size: 18, color: Colors.grey),
+                                      onPressed: _refreshNetworkInfo,
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      tooltip: 'Atualizar informações de rede',
+                                    )),
                                 const SizedBox(height: 16),
                                 _buildStatusCard(
                                   theme: theme,
@@ -419,9 +412,10 @@ class _StatusScreenState extends State<StatusScreen> {
       ],
     );
   }
-  
-  Widget _buildConnectionConfig(AgentProvider provider, String serverUrl, String moduleName) {
-     return Column(
+
+  Widget _buildConnectionConfig(
+      AgentProvider provider, String serverUrl, String moduleName) {
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildInfoRow('Servidor:', serverUrl),
@@ -448,63 +442,58 @@ class _StatusScreenState extends State<StatusScreen> {
       ],
     );
   }
-  
+
   Widget _buildNetworkInfo() {
     return FutureBuilder<Map<String, String>>(
       future: _networkInfoFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: SizedBox(
+          return const Center(
+              child: SizedBox(
             height: 20,
             width: 20,
             child: CircularProgressIndicator(strokeWidth: 2),
           ));
         }
-        
+
         if (snapshot.hasError) {
-           return _buildInfoRow('Erro:', 'Falha ao carregar');
+          return _buildInfoRow('Erro:', 'Falha ao carregar');
         }
 
         if (snapshot.hasData) {
           final info = snapshot.data!;
           return Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (info['connection_type'] ==
-                  'WiFi') ...[
+              if (info['connection_type'] == 'WiFi') ...[
                 _buildInfoRow('Tipo:', '📶 WiFi'),
                 const SizedBox(height: 8),
-                _buildInfoRow(
-                    'SSID:', info['wifi_ssid'] ?? 'N/A'),
+                _buildInfoRow('SSID:', info['wifi_ssid'] ?? 'N/A'),
                 const SizedBox(height: 8),
-                _buildInfoRow(
-                    'BSSID:', info['bssid'] ?? 'N/A'),
+                _buildInfoRow('BSSID:', info['bssid'] ?? 'N/A'),
                 const SizedBox(height: 8),
-                _buildInfoRow(
-                    'Sinal:', info['signal'] ?? 'N/A'),
+                _buildInfoRow('Sinal:', info['signal'] ?? 'N/A'),
               ] else ...[
-                _buildInfoRow('Tipo:',
-                    '🔌 ${info['connection_type'] ?? 'N/A'}'),
+                _buildInfoRow(
+                    'Tipo:', '🔌 ${info['connection_type'] ?? 'N/A'}'),
               ],
               const SizedBox(height: 8),
               _buildInfoRow('IP:', info['ip'] ?? 'N/A'),
               const SizedBox(height: 8),
-              _buildInfoRow(
-                  'MAC:', info['mac'] ?? 'N/A'),
+              _buildInfoRow('MAC:', info['mac'] ?? 'N/A'),
             ],
           );
         }
-        return const Center(child: SizedBox(
+        return const Center(
+            child: SizedBox(
           height: 20,
           width: 20,
-          child:
-              CircularProgressIndicator(strokeWidth: 2),
+          child: CircularProgressIndicator(strokeWidth: 2),
         ));
       },
     );
   }
-  
+
   Widget _buildLogs(ThemeData theme) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -534,14 +523,11 @@ class _StatusScreenState extends State<StatusScreen> {
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: () => _showLogs(context),
-                icon:
-                    const Icon(Icons.open_in_new, size: 16),
+                icon: const Icon(Icons.open_in_new, size: 16),
                 label: const Text('Ver Logs Completos'),
                 style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        theme.colorScheme.secondary,
-                    textStyle:
-                        const TextStyle(fontSize: 12),
+                    backgroundColor: theme.colorScheme.secondary,
+                    textStyle: const TextStyle(fontSize: 12),
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 8)),
               ),
@@ -555,8 +541,7 @@ class _StatusScreenState extends State<StatusScreen> {
                 AppLogger.logHistory.clear();
                 setState(() {});
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content: Text('Logs limpos')),
+                  const SnackBar(content: Text('Logs limpos')),
                 );
               },
             ),
@@ -565,7 +550,7 @@ class _StatusScreenState extends State<StatusScreen> {
       ],
     );
   }
-  
+
   Widget _buildFooterActions(ThemeData theme, AgentProvider provider) {
     return Container(
       padding: const EdgeInsets.all(24.0),
@@ -589,7 +574,7 @@ class _StatusScreenState extends State<StatusScreen> {
                   onPressed: () {
                     _logger.i('Sincronização forçada pelo usuário');
                     _backgroundService.runCycle();
-                    setState(() {}); 
+                    setState(() {});
                   },
                   icon: const Icon(Icons.sync_outlined, size: 20),
                   label: const Text('Forçar Sincronização'),
@@ -606,16 +591,14 @@ class _StatusScreenState extends State<StatusScreen> {
                           _backgroundService.stop();
                           setState(() {});
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('Serviço pausado')),
+                            const SnackBar(content: Text('Serviço pausado')),
                           );
                         }
                       : () {
                           _backgroundService.start();
                           setState(() {});
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('Serviço retomado')),
+                            const SnackBar(content: Text('Serviço retomado')),
                           );
                         },
                   icon: Icon(
@@ -624,9 +607,8 @@ class _StatusScreenState extends State<StatusScreen> {
                         : Icons.play_arrow,
                     size: 20,
                   ),
-                  label: Text(_backgroundService.isRunning
-                      ? 'Pausar'
-                      : 'Retomar'),
+                  label:
+                      Text(_backgroundService.isRunning ? 'Pausar' : 'Retomar'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _backgroundService.isRunning
                         ? Colors.orange
@@ -651,22 +633,10 @@ class _StatusScreenState extends State<StatusScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _openSettings(context),
-                  icon: const Icon(Icons.settings_applications_outlined, size: 18),
-                  label: const Text('Ajustes'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.grey[300],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: () => context
-                      .read<AgentProvider>()
-                      .enterReconfiguration(),
-                  icon: const Icon(Icons.replay_outlined, size: 20), 
+                  onPressed: () =>
+                      context.read<AgentProvider>().enterReconfiguration(),
+                  icon: const Icon(Icons.replay_outlined, size: 20),
                   label: const Text('Reconfigurar'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: theme.colorScheme.secondary,
@@ -832,8 +802,7 @@ Widget _buildSyncStats(
           theme: theme,
           icon: Icons.check_circle_outline,
           label: 'Sincronizações',
-          value:
-              '${backgroundService.syncCount}', 
+          value: '${backgroundService.syncCount}',
           color: Colors.green,
         ),
       ),
@@ -843,8 +812,7 @@ Widget _buildSyncStats(
           theme: theme,
           icon: Icons.error_outline,
           label: 'Erros',
-          value:
-              '${backgroundService.errorCount}', 
+          value: '${backgroundService.errorCount}',
           color: Colors.red,
         ),
       ),
@@ -854,8 +822,7 @@ Widget _buildSyncStats(
           theme: theme,
           icon: Icons.schedule,
           label: 'Uptime',
-          value: _formatUptime(backgroundService
-              .startTime), 
+          value: _formatUptime(backgroundService.startTime),
           color: Colors.blue,
         ),
       ),

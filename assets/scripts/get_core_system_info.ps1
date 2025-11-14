@@ -1,18 +1,24 @@
-# get_core_system_info.ps1 (UNIFICADO)
+# get_core_system_info.ps1 (UNIFICADO E CORRIGIDO)
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'SilentlyContinue'
 $ProgressPreference = 'SilentlyContinue'
 
 # --- 1. Informações Base ---
-$os = Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption, Version
+$os = Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption, Version, LastBootUpTime
 $cs = Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object Model, Manufacturer, TotalPhysicalMemory
 $bios = Get-CimInstance -ClassName Win32_BIOS | Select-Object SerialNumber
 $cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1 | Select-Object Name
 $volC = Get-Volume -DriveLetter C
 $disk = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq 0 } | Select-Object -First 1
 
-# --- 2. Rede (Lógica existente) ---
+# ✅ ADICIONADO: Uptime e Usuário
+$uptimeTicks = (Get-Date) - [System.Management.ManagementDateTimeConverter]::ToDateTime($os.LastBootUpTime)
+# Formata como "Xd Yh Zm"
+$uptime = "$($uptimeTicks.Days)d $($uptimeTicks.Hours)h $($uptimeTicks.Minutes)m"
+$currentUser = $env:USERNAME
+
+# --- 2. Rede ---
 $wifiAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and ($_.InterfaceDescription -match "Wi-Fi|Wireless|802.11") } | Select-Object -First 1
 $ethernetAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and $_.InterfaceDescription -notmatch "Wi-Fi|Wireless|802.11|Virtual|Hyper-V" } | Select-Object -First 1
 $activeAdapter = if ($wifiAdapter) { $wifiAdapter } else { $ethernetAdapter }
@@ -32,11 +38,11 @@ $connectionType = if ($wifiAdapter -and $wifiAdapter.Status -eq "Up") { "WiFi" }
                 elseif ($ethernetAdapter) { "Ethernet" } 
                 else { "Desconhecido" }
 
-# --- 3. Segurança (Lógica existente) ---
+# --- 3. Segurança ---
 $av = Get-MpComputerStatus | Select-Object AntivirusEnabled, AMProductVersion
 $bitlocker = Get-BitLockerVolume -MountPoint C: | Select-Object -ExpandProperty ProtectionStatus
 
-# --- 4. Detecção de Notebook (Lógica existente) ---
+# --- 4. Detecção de Notebook ---
 $isNotebook = $false
 $chassisTypes = @(8, 9, 10, 11, 14, 18, 21, 31, 32)
 $chassis = (Get-CimInstance -ClassName Win32_SystemEnclosure).ChassisTypes
@@ -47,27 +53,25 @@ foreach ($type in $chassis) {
     }
 }
 
-# --- 5. Software (Lógica existente) ---
+# --- 5. Software ---
 function Get-RegValue { param($path, $name) (Get-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue).$name }
 $javaVersion = Get-RegValue -path "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment" -name "CurrentVersion"
 if ($javaVersion) { $javaVersionPath = "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment\$javaVersion"; $javaVersion = Get-RegValue -path $javaVersionPath -name "JavaVersion" }
 $chromeVersion = (Get-RegValue -path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" -name "(default)" | Get-Item -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
 
-# --- 6. Programas Instalados (Unificado de get_installed_programs.ps1) ---
+# --- 6. Programas Instalados ---
 $installedPrograms = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object { $_.DisplayName -ne $null } | Select-Object DisplayName, DisplayVersion | ForEach-Object { "$($_.DisplayName) version $($_.DisplayVersion)" } | Sort-Object -Unique
 
-# --- 7. Bateria (Unificado de get_battery_info.ps1) ---
-$batteryLevel = $null
-$batteryHealth = "N/A"
-if ($isNotebook) {
-    $battery = Get-WmiObject Win32_Battery -ErrorAction SilentlyContinue
-    if ($battery) {
-        $batteryLevel = $battery.EstimatedChargeRemaining
-        $batteryHealth = if ($battery.BatteryStatus -eq 2) { "Carregando" } else { "OK" }
-    }
+# --- 7. Bateria ---
+$battery = Get-WmiObject Win32_Battery -ErrorAction SilentlyContinue
+$level = 0
+$health = "N/A"
+if ($battery) {
+  $level = $battery.EstimatedChargeRemaining
+  $health = if ($battery.BatteryStatus -eq 2) { "Carregando" } else { "OK" }
 }
 
-# --- 8. Periféricos (Unificado de get_peripherals.ps1) ---
+# --- 8. Periféricos ---
 $zebraStatus = "Não detectado"; $bematechStatus = "Não detectado"; $biometricStatus = "Não detectado"
 try {
     $allPrinters = Get-Printer -ErrorAction Stop
@@ -81,7 +85,7 @@ try {
     if ($biometricDevice) { $biometricStatus = if ($biometricDevice.Status -eq "OK") { "Conectado" } else { "Detectado - $($biometricDevice.Status)" } }
 } catch {}
 
-# --- 9. Validação de Hostname e Serial (Lógica existente) ---
+# --- 9. Validação de Hostname e Serial ---
 $hostname = $env:COMPUTERNAME
 $serial = $bios.SerialNumber
 if (-not $hostname -or $hostname.Trim() -eq "") { $hostname = $serial }
@@ -103,6 +107,8 @@ $data = [PSCustomObject]@{
     operating_system   = $os.Caption
     os_version         = $os.Version
     is_notebook        = $isNotebook
+    uptime             = $uptime       # ✅ CAMPO ADICIONADO
+    current_user       = $currentUser # ✅ CAMPO ADICIONADO
     
     # Rede
     ip_address         = $net.IPAddress
@@ -122,11 +128,11 @@ $data = [PSCustomObject]@{
     browser_version    = "Chrome $chromeVersion"
     installed_software = $installedPrograms
     
-    # Bateria (só p/ notebook)
-    battery_level      = $batteryLevel
-    battery_health     = $batteryHealth
+    # Bateria
+    battery_level      = $level
+    battery_health     = $health
     
-    # Periféricos (só p/ desktop)
+    # Periféricos
     biometric_reader   = $biometricStatus
     connected_printer  = "$zebraStatus / $bematechStatus"
 }

@@ -1,5 +1,4 @@
-// File: lib/services/legacy_totem_service.dart
-// Descrição: Serviço para enviar dados ao sistema legado de Totem
+// File: lib/services/legacy_totem_service.dart (CORRIGIDO)
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -8,17 +7,14 @@ import 'package:logger/logger.dart';
 class LegacyTotemService {
   final Logger _logger;
 
-  // CORREÇÃO (Item 19): Criar constante
   static const String _notDetected = 'Não detectado';
 
   LegacyTotemService(this._logger);
 
-  /// Envia dados para o endpoint legado de Totem
-  /// Rota: POST /api/monitor
   Future<bool> sendTotemData({
     required String serverUrl,
-    required Map<String, dynamic> systemInfo,
-    required String token, // ⬅️ ADICIONADO (Correto)
+    required Map<String, dynamic> systemInfo, // Agora recebe o coreInfo
+    required String token,
     String? sector,
     String? floor,
   }) async {
@@ -27,27 +23,30 @@ class LegacyTotemService {
       final payload = _buildLegacyPayload(systemInfo, sector, floor);
 
       _logger.i('📤 Enviando dados para sistema legado de Totem...');
-      _logger.d('   Payload: ${payload['serialNumber']} - ${payload['hostname']}');
+      _logger
+          .d('   Payload: ${payload['serialNumber']} - ${payload['hostname']}');
 
-      // ⬇️ MODIFICADO: Corrigido o endpoint e adicionado o token
-      final response = await http.post(
-        Uri.parse('$serverUrl/api/monitor'), // CORREÇÃO: Rota é /api/monitor
-        headers: {
-          'Content-Type': 'application/json',
-          'AUTH_TOKEN': token, // ⬅️ Header de autenticação legado (Correto)
-        },
-        body: json.encode(payload),
-      ).timeout(const Duration(seconds: 30));
+      final response = await http
+          .post(
+            Uri.parse('$serverUrl/api/monitor'), // Rota /api/monitor
+            headers: {
+              'Content-Type': 'application/json',
+              'AUTH_TOKEN': token, // Header de autenticação legado
+            },
+            body: json.encode(payload),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         final location = responseData['location'] ?? 'Desconhecida';
-        
+
         _logger.i('✅ Dados enviados ao sistema legado com sucesso!');
         _logger.i('   Localização: $location');
         return true;
       } else {
-        _logger.e('❌ Erro ao enviar para sistema legado: ${response.statusCode}');
+        _logger
+            .e('❌ Erro ao enviar para sistema legado: ${response.statusCode}');
         _logger.e('   Resposta: ${response.body}');
         return false;
       }
@@ -59,91 +58,55 @@ class LegacyTotemService {
 
   /// Constrói o payload no formato do sistema legado de Totem
   Map<String, dynamic> _buildLegacyPayload(
-    Map<String, dynamic> systemInfo,
+    Map<String, dynamic> systemInfo, // Este é o coreInfo
     String? sector,
     String? floor,
   ) {
+    // Extrai os status dos periféricos (que vêm como "Zebra / Bematech")
+    final peripherals =
+        (systemInfo['connected_printer'] ?? 'N/A / N/A').split('/');
+    final zebraStatus =
+        (peripherals.length > 0 ? peripherals[0].trim() : 'N/A');
+    final bematechStatus =
+        (peripherals.length > 1 ? peripherals[1].trim() : 'N/A');
+
     return {
-      // Campos obrigatórios do modelo Totem.js
+      // Campos do modelo Totem
       'hostname': systemInfo['hostname'] ?? 'Unknown',
       'serialNumber': systemInfo['serial_number'] ?? 'Unknown',
-      
-      // Campos opcionais (com valores padrão)
       'model': systemInfo['model'] ?? 'N/A',
-      'serviceTag': systemInfo['service_tag'] ?? 'N/A',
+      'serviceTag':
+          systemInfo['serial_number'] ?? 'N/A', // Usa serial como fallback
       'ip': systemInfo['ip_address'] ?? 'N/A',
-      
-      // Programas instalados
+      'macAddress': systemInfo['mac_address'] ?? 'N/A', // ✅ CORRIGIDO
+
       'installedPrograms': systemInfo['installed_software'] ?? [],
-      
-      // Status de periféricos (se disponíveis)
-      'printerStatus': _extractPrinterStatus(systemInfo),
-      'biometricReaderStatus': _extractBiometricStatus(systemInfo),
-      'zebraStatus': _extractPeripheralStatus(systemInfo, 'zebra'),
-      'bematechStatus': _extractPeripheralStatus(systemInfo, 'bematech'),
-      
-      // Tipo de totem (inferido do tipo de dispositivo)
-      'totemType': _inferTotemType(systemInfo),
-      
-      // Especificações de hardware
+
+      'biometricReaderStatus': systemInfo['biometric_reader'] ?? _notDetected,
+      'zebraStatus': zebraStatus, // ✅ CORRIGIDO
+      'bematechStatus': bematechStatus, // ✅ CORRIGIDO
+
+      // Infere o tipo (lógica movida para cá)
+      'totemType': _inferTotemType(
+          systemInfo['biometric_reader'], zebraStatus, bematechStatus),
+
       'ram': systemInfo['ram'] ?? 'N/A',
       'hdType': systemInfo['storage_type'] ?? 'N/A',
       'hdStorage': systemInfo['storage'] ?? 'N/A',
-      
-      // Dados customizados (setor e andar)
+
       'sector': sector ?? 'N/A',
       'floor': floor ?? 'N/A',
+
+      // Campos que o modelo totem.dart não usa, mas o legacy_totem_service esperava
+      'printerStatus': systemInfo['connected_printer'] ?? 'N/A',
     };
   }
 
-  /// Extrai status da impressora dos dados do sistema
-  String _extractPrinterStatus(Map<String, dynamic> systemInfo) {
-    final connectedPrinter = systemInfo['connected_printer'];
-    // CORREÇÃO (Item 19): Usar constante
-    if (connectedPrinter != null && connectedPrinter != _notDetected) {
-      return connectedPrinter.toString();
-    }
-    return 'N/A';
-  }
+  String _inferTotemType(String? biometric, String? zebra, String? bematech) {
+    final hasBiometric = biometric != null && biometric != _notDetected;
+    final hasPrinter = (zebra != null && zebra != _notDetected) ||
+        (bematech != null && bematech != _notDetected);
 
-  /// Extrai status do leitor biométrico
-  String _extractBiometricStatus(Map<String, dynamic> systemInfo) {
-    final biometric = systemInfo['biometric_reader'];
-    // CORREÇÃO (Item 19): Usar constante
-    if (biometric != null && biometric != _notDetected) {
-      return biometric.toString();
-    }
-    return 'N/A';
-  }
-
-  /// Extrai status de periférico específico
-  String _extractPeripheralStatus(Map<String, dynamic> systemInfo, String peripheral) {
-    // Tenta extrair do campo connected_printer que pode conter "zebra / bematech"
-    final connectedPrinter = systemInfo['connected_printer']?.toString() ?? '';
-    
-    if (connectedPrinter.toLowerCase().contains(peripheral.toLowerCase())) {
-      final parts = connectedPrinter.split('/');
-      for (var part in parts) {
-        if (part.toLowerCase().contains(peripheral.toLowerCase())) {
-          return part.trim();
-        }
-      }
-    }
-    return 'N/A';
-  }
-
-  /// Infere o tipo de totem baseado nas características do dispositivo
-  String _inferTotemType(Map<String, dynamic> systemInfo) {
-    // Verifica se tem biométrico
-    // CORREÇÃO (Item 19): Usar constante
-    final hasBiometric = systemInfo['biometric_reader'] != null &&
-        systemInfo['biometric_reader'] != _notDetected;
-    
-    // Verifica se tem impressora zebra/bematech
-    // CORREÇÃO (Item 19): Usar constante
-    final hasPrinter = systemInfo['connected_printer'] != null &&
-        systemInfo['connected_printer'] != _notDetected;
-    
     if (hasBiometric && hasPrinter) {
       return 'Totem Completo';
     } else if (hasBiometric) {
