@@ -196,11 +196,19 @@ class BackgroundService {
   }
 
   void _scheduleNextRun(int intervalSeconds) {
-    _logger.i('   Agendando próximo ciclo em $intervalSeconds segundos');
+    // ✅ CORREÇÃO: Atualiza a data da próxima execução para a UI exibir
+    nextRunTime = DateTime.now().add(Duration(seconds: intervalSeconds));
+
+    _logger.i(
+        '   Agendando próximo ciclo em $intervalSeconds segundos (para: $nextRunTime)');
+
     _timer = Timer(Duration(seconds: intervalSeconds), () async {
       if (!_isRunning) return;
+
       await runCycle();
+
       if (_isRunning) {
+        // Pega o intervalo atualizado das configurações
         final currentInterval =
             _currentSettings!['interval'] as int? ?? intervalSeconds;
         _scheduleNextRun(currentInterval);

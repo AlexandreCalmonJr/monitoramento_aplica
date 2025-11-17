@@ -141,9 +141,10 @@ class CommandExecutorService {
       _logger.i(
         success ? '✅ Comando executado com sucesso' : '❌ Comando falhou',
       );
-      if (stdout.isNotEmpty)
+      if (stdout.isNotEmpty) {
         _logger.d(
             '   STDOUT: ${stdout.substring(0, stdout.length > 200 ? 200 : stdout.length)}...');
+      }
       if (stderr.isNotEmpty) _logger.w('   STDERR: $stderr');
     } catch (e) {
       stopwatch.stop();
