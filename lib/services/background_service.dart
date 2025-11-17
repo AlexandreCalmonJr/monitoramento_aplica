@@ -50,13 +50,11 @@ class BackgroundService {
   /// Inicia o polling de comandos remotos
   Future<void> _startCommandPolling() async {
     try {
-      // Recarrega settings para garantir dados frescos
       await _settingsService.loadSettings();
 
       if (_settingsService.ip.isEmpty ||
           _settingsService.token.isEmpty ||
           _settingsService.moduleId.isEmpty) {
-        // Silencioso para não spammar log se não estiver configurado
         return;
       }
 
@@ -65,15 +63,16 @@ class BackgroundService {
       final serverUrl =
           'http://${_settingsService.ip}:${_settingsService.port}';
 
-      // Inicia o serviço de comandos
+      // ✅ ALTERADO: De 30 segundos para 5 segundos
       commandExecutor.startCommandPolling(
         serverUrl: serverUrl,
         moduleId: _settingsService.moduleId,
         serialNumber: serialNumber,
-        interval: const Duration(seconds: 30),
+        interval: const Duration(seconds: 5), // <--- MUDOU AQUI
       );
 
-      _logger.i('✅ Polling de comandos ativado para S/N: $serialNumber');
+      _logger.i(
+          '✅ Polling de comandos ativado (Ciclo: 5s) para S/N: $serialNumber');
     } catch (e) {
       _logger.e('❌ Erro ao iniciar polling de comandos: $e');
     }
