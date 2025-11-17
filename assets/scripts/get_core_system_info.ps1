@@ -1,139 +1,221 @@
-# get_core_system_info.ps1 (UNIFICADO E CORRIGIDO)
+# get_core_system_info.ps1
+# VERSÃO: NOMES REAIS DE IMPRESSORAS (FIM DO "N" E "A")
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = 'SilentlyContinue'
-$ProgressPreference = 'SilentlyContinue'
 
-# --- 1. Informações Base ---
-$os = Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption, Version, LastBootUpTime
-$cs = Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object Model, Manufacturer, TotalPhysicalMemory
-$bios = Get-CimInstance -ClassName Win32_BIOS | Select-Object SerialNumber
-$cpu = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1 | Select-Object Name
-$volC = Get-Volume -DriveLetter C
-$disk = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq 0 } | Select-Object -First 1
+# --- Funções Auxiliares ---
+function Get-RegValue { param($path, $name) try { (Get-ItemProperty -Path $path -Name $name).$name } catch { $null } }
 
-# ✅ ADICIONADO: Uptime e Usuário
-$uptimeTicks = (Get-Date) - [System.Management.ManagementDateTimeConverter]::ToDateTime($os.LastBootUpTime)
-# Formata como "Xd Yh Zm"
-$uptime = "$($uptimeTicks.Days)d $($uptimeTicks.Hours)h $($uptimeTicks.Minutes)m"
-$currentUser = $env:USERNAME
-
-# --- 2. Rede ---
-$wifiAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and ($_.InterfaceDescription -match "Wi-Fi|Wireless|802.11") } | Select-Object -First 1
-$ethernetAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and $_.InterfaceDescription -notmatch "Wi-Fi|Wireless|802.11|Virtual|Hyper-V" } | Select-Object -First 1
-$activeAdapter = if ($wifiAdapter) { $wifiAdapter } else { $ethernetAdapter }
-$net = if ($activeAdapter) { Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $activeAdapter.InterfaceIndex | Select-Object -First 1 } else { $null }
-$mac = if ($activeAdapter) { $activeAdapter.MacAddress } else { $null }
-$bssid = $null; $ssid = $null; $signalQuality = $null
+# --- 1. UPTIME ---
+$uptime = "0d 0h 0m"
 try {
-    $wlanInfo = netsh wlan show interfaces | Select-String "BSSID", "SSID", "Signal"
-    foreach ($line in $wlanInfo) {
-        $lineStr = $line.ToString().Trim()
-        if ($lineStr -match "BSSID\s+:\s+(.+)") { $bssid = $Matches[1].Trim() }
-        if ($lineStr -match "SSID\s+:\s+(.+)" -and $lineStr -notmatch "BSSID") { $ssid = $Matches[1].Trim() }
-        if ($lineStr -match "Signal\s+:\s+(\d+)%") { $signalQuality = $Matches[1].Trim() + "%" }
+    $osObj = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+    if ($osObj.LastBootUpTime) {
+        $timeSpan = (Get-Date) - $osObj.LastBootUpTime
+        $uptime = "$($timeSpan.Days)d $($timeSpan.Hours)h $($timeSpan.Minutes)m"
+    }
+} catch { $uptime = "N/A" }
+
+# --- 2. Hardware ---
+$model = "N/A"; $manufacturer = "N/A"; $processor = "N/A"; $ram = "N/A"
+try {
+    $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop | Select-Object Model, Manufacturer, TotalPhysicalMemory
+    $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object Name
+    if ($cs.Model) { $model = $cs.Model.Trim() }
+    if ($cs.Manufacturer) { $manufacturer = $cs.Manufacturer.Trim() }
+    if ($cs.TotalPhysicalMemory) { $ram = "$([math]::Round($cs.TotalPhysicalMemory / 1GB)) GB" }
+    if ($cpu.Name) { $processor = $cpu.Name.Trim() }
+} catch {
+    $regSystem = "HKLM:\HARDWARE\DESCRIPTION\System\BIOS"
+    $regCpu = "HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0"
+    if ($model -eq "N/A") { $model = Get-RegValue $regSystem "SystemProductName" }
+    if ($manufacturer -eq "N/A") { $manufacturer = Get-RegValue $regSystem "SystemManufacturer" }
+    if ($processor -eq "N/A") { $processor = Get-RegValue $regCpu "ProcessorNameString" }
+}
+if ($processor -eq "N/A") { $processor = $env:PROCESSOR_IDENTIFIER }
+
+# --- 3. Armazenamento ---
+$storage = "N/A"; $storageType = "N/A"
+try {
+    $volC = Get-Volume -DriveLetter C -ErrorAction SilentlyContinue
+    if ($volC) { $storage = "$([math]::Round($volC.Size / 1GB, 2)) GB" }
+    $disk = Get-PhysicalDisk | Where-Object { $_.DeviceID -eq 0 }
+    if ($disk) { $storageType = $disk.MediaType }
+} catch {}
+
+# --- 4. Sistema Operacional ---
+$osName = "Windows"; $osVersion = "N/A"
+try {
+    if ($osObj) { $osName = $osObj.Caption; $osVersion = $osObj.Version }
+    else { 
+        $osName = (Get-CimInstance Win32_OperatingSystem).Caption
+        $osVersion = (Get-CimInstance Win32_OperatingSystem).Version 
     }
 } catch {}
-$connectionType = if ($wifiAdapter -and $wifiAdapter.Status -eq "Up") { "WiFi" } 
-                elseif ($ethernetAdapter) { "Ethernet" } 
-                else { "Desconhecido" }
 
-# --- 3. Segurança ---
-$av = Get-MpComputerStatus | Select-Object AntivirusEnabled, AMProductVersion
-$bitlocker = Get-BitLockerVolume -MountPoint C: | Select-Object -ExpandProperty ProtectionStatus
-
-# --- 4. Detecção de Notebook ---
-$isNotebook = $false
-$chassisTypes = @(8, 9, 10, 11, 14, 18, 21, 31, 32)
-$chassis = (Get-CimInstance -ClassName Win32_SystemEnclosure).ChassisTypes
-foreach ($type in $chassis) {
-    if ($chassisTypes -contains $type) {
-        $isNotebook = $true
-        break
+# --- 5. Rede ---
+$ipAddress = "N/A"; $macAddress = "N/A"; $bssid = "N/A"; $ssid = "N/A"; $signal = 0 
+try {
+    $activeAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Sort-Object LinkSpeed -Descending | Select-Object -First 1
+    if ($activeAdapter) {
+        $macAddress = $activeAdapter.MacAddress
+        $ipInfo = Get-NetIPAddress -InterfaceIndex $activeAdapter.InterfaceIndex -AddressFamily IPv4
+        if ($ipInfo) { $ipAddress = $ipInfo.IPAddress }
+        if ($activeAdapter.MediaType -match "802.11|Wireless") {
+             $wifiStatus = netsh wlan show interfaces
+             if ($wifiStatus -match "BSSID\s*:\s*([a-fA-F0-9:]+)") { $bssid = $Matches[1].Trim() }
+             if ($wifiStatus -match "SSID\s*:\s*(.+)") { $ssid = $Matches[1].Trim() }
+             if ($wifiStatus -match "Sinal\s*:\s*(\d+)%") { $signal = [int]$Matches[1] }
+        }
     }
+} catch {}
+
+# --- 6. Bateria ---
+$batteryLevel = $null; $isNotebook = $false
+try {
+    $battery = Get-WmiObject Win32_Battery -ErrorAction Stop
+    if ($battery) { $batteryLevel = $battery.EstimatedChargeRemaining; $isNotebook = $true }
+} catch {}
+if (-not $isNotebook) {
+    try {
+        $chassis = (Get-CimInstance Win32_SystemEnclosure).ChassisTypes
+        if ($chassis -contains 9 -or $chassis -contains 10) { $isNotebook = $true }
+    } catch {}
 }
 
-# --- 5. Software ---
-function Get-RegValue { param($path, $name) (Get-ItemProperty -Path $path -Name $name -ErrorAction SilentlyContinue).$name }
-$javaVersion = Get-RegValue -path "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment" -name "CurrentVersion"
-if ($javaVersion) { $javaVersionPath = "HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment\$javaVersion"; $javaVersion = Get-RegValue -path $javaVersionPath -name "JavaVersion" }
-$chromeVersion = (Get-RegValue -path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" -name "(default)" | Get-Item -ErrorAction SilentlyContinue).VersionInfo.ProductVersion
+# --- 7. IMPRESSORAS: LOGICA AVANÇADA ---
+$zebraInfo = "Não Instalada"
+$bematechInfo = "Não Instalada"
+$defaultPrinterName = "Nenhuma Padrão"
+$totemType = "Administrativo/Outro"
 
-# --- 6. Programas Instalados ---
-$installedPrograms = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" | Where-Object { $_.DisplayName -ne $null } | Select-Object DisplayName, DisplayVersion | ForEach-Object { "$($_.DisplayName) version $($_.DisplayVersion)" } | Sort-Object -Unique
+try {
+    $allPrinters = Get-Printer -ErrorAction SilentlyContinue
+    
+    # 1. Impressora Padrão (Tenta WMI primeiro, depois Get-Printer)
+    $wmiDefault = Get-CimInstance -ClassName Win32_Printer | Where-Object Default -eq $true | Select-Object -First 1
+    if ($wmiDefault) { 
+        $defaultPrinterName = $wmiDefault.Name 
+    } else {
+        # Fallback
+        $psDefault = $allPrinters | Where-Object Type -eq "Local" | Select-Object -First 1
+        if ($psDefault) { $defaultPrinterName = $psDefault.Name }
+    }
 
-# --- 7. Bateria ---
-$battery = Get-WmiObject Win32_Battery -ErrorAction SilentlyContinue
-$level = 0
-$health = "N/A"
-if ($battery) {
-  $level = $battery.EstimatedChargeRemaining
-  $health = if ($battery.BatteryStatus -eq 2) { "Carregando" } else { "OK" }
+    # 2. ZEBRA (Procura por Zebra ou ZDesigner)
+    $zebraObj = $allPrinters | Where-Object { $_.Name -match "Zebra|ZDesigner|ZD" } | Select-Object -First 1
+    $hasZebra = $false
+    if ($zebraObj) {
+        $hasZebra = $true
+        # Traduz Status Code
+        $st = "Desconhecido"
+        if ($zebraObj.PrinterStatus -eq "Normal" -or $zebraObj.PrinterStatus -eq "Idle") { $st = "Pronta" }
+        elseif ($zebraObj.PrinterStatus -eq "Offline") { $st = "Offline" }
+        elseif ($zebraObj.PrinterStatus -eq "Error") { $st = "Erro" }
+        else { $st = $zebraObj.PrinterStatus }
+        
+        $zebraInfo = "$($zebraObj.Name) ($st)"
+    }
+
+    # 3. BEMATECH (Procura por Bematech ou MP-4200)
+    $bemaObj = $allPrinters | Where-Object { $_.Name -match "Bematech|MP-4200|MP4200" } | Select-Object -First 1
+    $hasBematech = $false
+    if ($bemaObj) {
+        $hasBematech = $true
+        $st = "Desconhecido"
+        if ($bemaObj.PrinterStatus -eq "Normal" -or $bemaObj.PrinterStatus -eq "Idle") { $st = "Pronta" }
+        elseif ($bemaObj.PrinterStatus -eq "Offline") { $st = "Offline" }
+        elseif ($bemaObj.PrinterStatus -eq "Error") { $st = "Erro" }
+        else { $st = $bemaObj.PrinterStatus }
+        
+        $bematechInfo = "$($bemaObj.Name) ($st)"
+    }
+
+    # 4. DEFINIÇÃO DE TIPO (REGRA DE NEGÓCIO)
+    if ($hasZebra) {
+        # Se tem Zebra (mesmo com Bematech junto) -> Emergência
+        $totemType = "Emergência"
+    } elseif ($hasBematech) {
+        # Se tem SÓ Bematech (sem Zebra) -> Fiscal
+        $totemType = "Fiscal"
+    }
+
+} catch {
+    $defaultPrinterName = "Erro na detecção"
+    $zebraInfo = "Erro"
+    $bematechInfo = "Erro"
 }
 
-# --- 8. Periféricos ---
-$zebraStatus = "Não detectado"; $bematechStatus = "Não detectado"; $biometricStatus = "Não detectado"
+# --- 8. Leitor Biométrico ---
+$biometricStatus = "Não detectado"
 try {
-    $allPrinters = Get-Printer -ErrorAction Stop
-    foreach ($printer in $allPrinters) {
-        if ($printer.Name -match "Zebra|ZDesigner|ZD") { $zebraStatus = "Conectado - $($printer.PrinterStatus)" }
-        if ($printer.Name -match "Bematech|MP-4200|MP4200") { $bematechStatus = "Conectado - $($printer.PrinterStatus)" }
-    }
-} catch {}
-try {
-    $biometricDevice = Get-PnpDevice -Class "Biometric" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($biometricDevice) { $biometricStatus = if ($biometricDevice.Status -eq "OK") { "Conectado" } else { "Detectado - $($biometricDevice.Status)" } }
+    $bio = Get-PnpDevice -Class "Biometric" -Status OK -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($bio) { $biometricStatus = "Conectado" }
 } catch {}
 
-# --- 9. Validação de Hostname e Serial ---
+# --- 9. AUDITORIA DE APPS ---
+$programsList = @()
+$hasNdd = $false
+$hasCortex = $false
+$hasCapturaBio = $false
+$hasAutomatos = $false
+
+try {
+    $keys = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+    $rawPrograms = Get-ItemProperty $keys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -ne $null }
+
+    # Verifica com regex (match case insensitive)
+    $hasNdd = ($rawPrograms.DisplayName -match "NDD|PrintClient").Count -gt 0
+    $hasCortex = ($rawPrograms.DisplayName -match "Cortex|Palo Alto").Count -gt 0
+    $hasCapturaBio = ($rawPrograms.DisplayName -match "CapturaBio").Count -gt 0
+    $hasAutomatos = ($rawPrograms.DisplayName -match "Automatos").Count -gt 0
+
+    $programsList = $rawPrograms | 
+        Select-Object @{N="Name";E={$_.DisplayName}}, @{N="Version";E={$_.DisplayVersion}} | 
+        Sort-Object -Unique Name | 
+        ForEach-Object { "$($_.Name) v$($_.Version)" }
+} catch {}
+
+# --- 10. Saída JSON ---
 $hostname = $env:COMPUTERNAME
-$serial = $bios.SerialNumber
-if (-not $hostname -or $hostname.Trim() -eq "") { $hostname = $serial }
-if (-not $serial -or $serial.Trim() -eq "" -or $serial -match "000000" -or $serial -match "N/A") { $serial = $hostname }
-if (-not $hostname -or $hostname.Trim() -eq "") { $hostname = "HostDesconhecido" }
-if (-not $serial -or $serial.Trim() -eq "") { $serial = $hostname }
+$currentUser = $env:USERNAME
+$serial = (Get-CimInstance Win32_BIOS).SerialNumber
+if (-not $serial -or $serial -match "000000|To be filled") { $serial = $hostname }
 
-# --- 10. Objeto JSON Final (Unificado) ---
 $data = [PSCustomObject]@{
-    # Core
-    hostname           = $hostname.Trim()
-    serial_number      = $serial.Trim()
-    model              = $cs.Model
-    manufacturer       = $cs.Manufacturer
-    processor          = $cpu.Name
-    ram                = "$([math]::Round($cs.TotalPhysicalMemory / 1GB)) GB"
-    storage            = "$([math]::Round($volC.Size / 1GB, 2)) GB"
-    storage_type       = $disk.MediaType
-    operating_system   = $os.Caption
-    os_version         = $os.Version
-    is_notebook        = $isNotebook
-    uptime             = $uptime       # ✅ CAMPO ADICIONADO
-    current_user       = $currentUser # ✅ CAMPO ADICIONADO
+    hostname = $hostname
+    serial_number = $serial
+    asset_name = $hostname
+    uptime = $uptime
     
-    # Rede
-    ip_address         = $net.IPAddress
-    mac_address        = $mac
-    mac_address_radio  = $bssid
-    wifi_ssid          = $ssid
-    wifi_signal        = $signalQuality
-    connection_type    = $connectionType
+    model = $model
+    processor = $processor
+    ram = $ram
+    storage = $storage
     
-    # Segurança
-    antivirus_status   = $av.AntivirusEnabled
-    antivirus_version  = $av.AMProductVersion
-    is_encrypted       = if ($bitlocker -eq "On") { $true } else { $false }
+    ip_address = $ipAddress
+    mac_address = $macAddress
+    wifi_ssid = $ssid
+    wifi_signal = $signal
+    battery_level = $batteryLevel 
     
-    # Software
-    java_version       = $javaVersion
-    browser_version    = "Chrome $chromeVersion"
-    installed_software = $installedPrograms
+    # --- Campos Solicitados ---
+    totem_type = $totemType            # "Emergência" / "Fiscal"
+    printerStatus = $defaultPrinterName # Nome da Impressora Padrão
+    zebraStatus = $zebraInfo           # Ex: "ZDesigner TLP (Pronta)" (NÃO MAIS "N" ou "A")
+    bematechStatus = $bematechInfo     # Ex: "Bematech MP-4200 (Offline)"
+    biometricReaderStatus = $biometricStatus
     
-    # Bateria
-    battery_level      = $level
-    battery_health     = $health
+    # --- Auditoria de Apps ---
+    app_ndd_installed = $hasNdd
+    app_cortex_installed = $hasCortex
+    app_capturabio_installed = $hasCapturaBio
+    app_automatos_installed = $hasAutomatos
     
-    # Periféricos
-    biometric_reader   = $biometricStatus
-    connected_printer  = "$zebraStatus / $bematechStatus"
+    installed_software = $programsList
+    last_seen = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssK")
+    current_user = $currentUser
 }
-$data | ConvertTo-Json -Depth 4
+
+$data | ConvertTo-Json -Depth 3 -Compress

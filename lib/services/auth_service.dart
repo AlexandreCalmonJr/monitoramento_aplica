@@ -21,6 +21,8 @@ class AuthService {
   /// Retorna o token apropriado para uso
   String? get token => _jwtToken ?? _legacyToken;
 
+  get currentToken => null;
+
   /// Carrega tokens salvos
   Future<void> loadTokens() async {
     try {

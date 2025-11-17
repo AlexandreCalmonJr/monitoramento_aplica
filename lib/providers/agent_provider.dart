@@ -117,8 +117,9 @@ class AgentProvider extends ChangeNotifier {
       _logger.i('Configuração encontrada, definindo status como configurado');
       _status = AgentStatus.configured;
       await _authService.saveLegacyToken(_settingsService.token);
-      if (_availableModules.isEmpty && !_forceLegacyMode)
+      if (_availableModules.isEmpty && !_forceLegacyMode) {
         fetchModules(testConnectionOnly: true);
+      }
     } else {
       _logger.i('Nenhuma configuração encontrada, aguardando onboarding');
       _status = AgentStatus.unconfigured;

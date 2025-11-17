@@ -1,5 +1,5 @@
 // File: lib/services/monitoring_service.dart
-// VERSÃO COM DETECÇÃO AUTOMÁTICA DE MÓDULOS LEGADOS
+// VERSÃO CORRIGIDA: VALIDACAO DE BATERIA (0-100)
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -44,25 +44,6 @@ class MonitoringService {
       return latin1.decode(output, allowInvalid: true);
     }
     return output.toString();
-  }
-
-  Future<String> _runCommand(String command, List<String> args) async {
-    try {
-      final result = await Process.run(command, args, runInShell: true);
-      final stdoutString = _decodeOutput(result.stdout);
-      final stderrString = _decodeOutput(result.stderr);
-
-      if (result.exitCode == 0) {
-        return stdoutString.trim();
-      } else {
-        _logger
-            .w("Erro no comando '$command ${args.join(' ')}': $stderrString");
-        return "";
-      }
-    } catch (e) {
-      _logger.e("Exceção no comando '$command ${args.join(' ')}': $e");
-      return "";
-    }
   }
 
   Future<String> _runScript(String scriptName) async {
@@ -195,9 +176,6 @@ class MonitoringService {
         }
       }
 
-      // CORREÇÃO (Item 5): Lógica de validação de serial removida daqui,
-      // pois foi movida para o PayloadValidator.
-      // A lógica de fallback permanece.
       String serial = (payload['serial_number'] ?? '').toString().trim();
       String assetName = (payload['asset_name'] ?? '').toString().trim();
       String hostname = (payload['hostname'] ?? '').toString().trim();
@@ -310,23 +288,18 @@ class MonitoringService {
 
       // --- ✅ LÓGICA DE DECISÃO BINÁRIA (Sem Híbrido) ---
 
-      // 1. O Modo Legado está forçado E o dispositivo NÃO é um notebook?
       if (forceLegacyMode == true && !isNotebook) {
         _logger.i(
             '🔧 Modo legado forçado (Desktop/Totem). Enviando APENAS para /api/monitor.');
         await _sendToLegacySystem(
             coreInfo, serverUrl, token, manualSector ?? '', manualFloor ?? '');
-
-        // Esta é a correção: para de executar e não tenta enviar para os módulos.
         _consecutiveErrors = 0;
         _logger.i('✅ CICLO (LEGADO) CONCLUÍDO\n');
-        return; // <-- PARA A EXECUÇÃO AQUI
+        return;
       }
 
-      // 2. Se a condição acima for falsa (é notebook OU não está forçado)
-      //    trata como um envio normal para o Sistema de Módulos.
       _logger.i('Executando envio para Sistema de Módulos...');
-      String effectiveModuleId = moduleId; // Usa o ID salvo
+      String effectiveModuleId = moduleId;
 
       if (effectiveModuleId.isEmpty) {
         _logger.w('⚠️ Nenhum módulo configurado. Tentando auto-detecção...');
@@ -349,7 +322,6 @@ class MonitoringService {
             .i('✅ Usando módulo configurado pelo usuário: $effectiveModuleId');
       }
 
-      // Envia os dados para o módulo novo
       await _sendToNewSystem(
         coreInfo,
         serverUrl,
@@ -381,7 +353,6 @@ class MonitoringService {
     _logger.i('✅ CICLO (MÓDULOS) CONCLUÍDO\n');
   }
 
-  // --- ENVIO PARA SISTEMA LEGADO (CORRIGIDO) ---
   Future<void> _sendToLegacySystem(
     Map<String, dynamic> coreInfo,
     String serverUrl,
@@ -391,12 +362,9 @@ class MonitoringService {
   ) async {
     _logger.i('📡 Enviando para sistema LEGADO de Totem (/api/monitor)...');
 
-    // ✅ CORREÇÃO: Não chama mais scripts antigos
-    // Os dados (periféricos, programas) já estão em coreInfo
-
     final success = await _legacyTotemService.sendTotemData(
       serverUrl: serverUrl,
-      systemInfo: coreInfo, // Passa o coreInfo completo
+      systemInfo: coreInfo,
       token: token,
       sector: sector,
       floor: floor,
@@ -409,7 +377,6 @@ class MonitoringService {
     }
   }
 
-  // --- ENVIO PARA SISTEMA NOVO (CORRIGIDO) ---
   Future<void> _sendToNewSystem(
     Map<String, dynamic> coreInfo,
     String serverUrl,
@@ -452,9 +419,6 @@ class MonitoringService {
       payload['asset_name'] = assetName;
     }
 
-    // ✅ CORREÇÃO: 'current_user' já vem do coreInfo
-    // payload['assigned_to'] = await _runCommand('whoami', []);
-
     // Remove dados desnecessários dependendo do tipo
     switch (moduleType) {
       case 'desktop':
@@ -467,9 +431,16 @@ class MonitoringService {
         _logger.i('💼 Preparando dados de Notebook...');
         payload.remove('biometric_reader');
         payload.remove('connected_printer');
-        break;
 
-      // ... (outros cases) ...
+        // ✅ CORREÇÃO: Alterado de -1 para 0 para satisfazer validação (0-100)
+        if (payload['battery_level'] == null) {
+          _logger.w(
+              '⚠️ Nível de bateria nulo detectado em Notebook. Usando valor padrão (0).');
+          payload['battery_level'] = 0; // <-- MUDADO DE -1 PARA 0
+          payload['battery_health'] =
+              payload['battery_health'] ?? 'Não detectada';
+        }
+        break;
     }
 
     if (!_moduleStructureService.validateData(payload, structure.type)) {
@@ -479,7 +450,6 @@ class MonitoringService {
     await _sendPayload(payload, serverUrl, moduleId, moduleType);
   }
 
-  // Método auxiliar para impressoras (mantido do original)
   Future<void> _handlePrinterModule(
     String serverUrl,
     String moduleId,

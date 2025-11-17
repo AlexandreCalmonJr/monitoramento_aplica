@@ -4,9 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:agent_windows/providers/agent_provider.dart';
-import 'package:agent_windows/screens/settings_screen.dart';
 import 'package:agent_windows/services/background_service.dart';
-import 'package:agent_windows/services/module_detection_service.dart';
 import 'package:agent_windows/services/service_locator.dart';
 import 'package:agent_windows/utils/app_logger.dart';
 

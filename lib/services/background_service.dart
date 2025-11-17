@@ -1,9 +1,12 @@
-// File: lib/services/background_service.dart (CORRIGIDO)
+// File: lib/services/background_service.dart
 import 'dart:async';
+import 'dart:io';
 
 import 'package:agent_windows/services/monitoring_service.dart';
 import 'package:agent_windows/services/settings_service.dart';
 import 'package:logger/logger.dart';
+import 'package:agent_windows/services/command_executor_service.dart';
+import 'package:agent_windows/services/service_locator.dart';
 
 class BackgroundService {
   Timer? _timer;
@@ -23,7 +26,6 @@ class BackgroundService {
   int errorCount = 0;
   DateTime? startTime;
 
-  // Construtor com DI
   BackgroundService(
       this._logger, this._settingsService, this._monitoringService) {
     _logger.i('BackgroundService inicializado');
@@ -32,7 +34,6 @@ class BackgroundService {
   Future<void> initialize() async {
     await _settingsService.loadSettings();
 
-    // A lógica de "configurado" no provider já valida isso
     if (_settingsService.ip.isNotEmpty &&
         _settingsService.port.isNotEmpty &&
         _settingsService.token.isNotEmpty) {
@@ -40,6 +41,63 @@ class BackgroundService {
     } else {
       _logger.w('⚠️  Background Service: Aguardando configuração inicial');
       lastRunStatus = "Aguardando Configuração";
+    }
+
+    // Tenta iniciar, mas não bloqueia se falhar
+    _startCommandPolling();
+  }
+
+  /// Inicia o polling de comandos remotos
+  Future<void> _startCommandPolling() async {
+    try {
+      // Recarrega settings para garantir dados frescos
+      await _settingsService.loadSettings();
+
+      if (_settingsService.ip.isEmpty ||
+          _settingsService.token.isEmpty ||
+          _settingsService.moduleId.isEmpty) {
+        // Silencioso para não spammar log se não estiver configurado
+        return;
+      }
+
+      final serialNumber = await _getSerialNumber();
+      final commandExecutor = locator<CommandExecutorService>();
+      final serverUrl =
+          'http://${_settingsService.ip}:${_settingsService.port}';
+
+      // Inicia o serviço de comandos
+      commandExecutor.startCommandPolling(
+        serverUrl: serverUrl,
+        moduleId: _settingsService.moduleId,
+        serialNumber: serialNumber,
+        interval: const Duration(seconds: 30),
+      );
+
+      _logger.i('✅ Polling de comandos ativado para S/N: $serialNumber');
+    } catch (e) {
+      _logger.e('❌ Erro ao iniciar polling de comandos: $e');
+    }
+  }
+
+  Future<String> _getSerialNumber() async {
+    try {
+      final result = await Process.run(
+        'wmic',
+        ['bios', 'get', 'serialnumber'],
+        runInShell: true,
+      );
+      final serial = result.stdout
+          .toString()
+          .split('\n')
+          .where((line) =>
+              line.trim().isNotEmpty && !line.contains('SerialNumber'))
+          .first
+          .trim();
+      return serial.isNotEmpty
+          ? serial
+          : (Platform.environment['COMPUTERNAME'] ?? 'UNKNOWN');
+    } catch (e) {
+      return Platform.environment['COMPUTERNAME'] ?? 'UNKNOWN';
     }
   }
 
@@ -50,8 +108,6 @@ class BackgroundService {
     }
 
     await _settingsService.loadSettings();
-
-    // O check de config incompleta agora é feito no runCycle
 
     _currentSettings = {
       'moduleId': _settingsService.moduleId,
@@ -67,90 +123,57 @@ class BackgroundService {
     _isRunning = true;
     startTime = DateTime.now();
     _logger.i('✅ Background Service: Iniciado');
-    _logger.i(
-        '   Módulo: ${_settingsService.moduleId.isEmpty ? "N/A" : _settingsService.moduleId}');
-    _logger.i('   Modo Legado: ${_settingsService.forceLegacyMode}');
-    _logger.i('   Servidor: ${_currentSettings!['serverUrl']}');
-    _logger.i('   Intervalo: ${_settingsService.interval}s');
 
     _timer?.cancel();
-
-    // Executa o ciclo em segundo plano e libera a UI
-    runCycle();
-
+    runCycle(); // Executa o primeiro ciclo
     _scheduleNextRun(_settingsService.interval);
+
+    // Força início do polling ao iniciar o serviço
+    _startCommandPolling();
   }
 
   Future<void> runCycle() async {
-    if (_currentSettings == null) {
-      _logger.e('❌ _currentSettings é nulo. Ciclo abortado.');
-      lastRunStatus = "Erro: Config nula";
-      return;
-    }
+    if (_currentSettings == null) return;
 
-    // --- ✅ INÍCIO DA CORREÇÃO ---
     final moduleId = _currentSettings!['moduleId'] as String?;
     final serverUrl = _currentSettings!['serverUrl'] as String?;
     final token = _currentSettings!['token'] as String?;
     final forceLegacyMode =
         _currentSettings!['forceLegacyMode'] as bool? ?? false;
 
-    // 1. Verifica se IP, Porta e Token existem
-    final bool connectionInfoMissing = (serverUrl == null ||
+    // Validação básica
+    if (serverUrl == null ||
         serverUrl.isEmpty ||
-        serverUrl == "http://:" ||
         token == null ||
-        token.isEmpty);
-
-    // 2. Verifica se o Módulo é necessário
-    //    (Não é necessário se o modo legado estiver forçado)
-    final bool moduleInfoMissing =
-        (!forceLegacyMode && (moduleId == null || moduleId.isEmpty));
-
-    if (connectionInfoMissing || moduleInfoMissing) {
-      _logger.e(
-          '❌ Background Service: Configurações incompletas para executar ciclo');
-      if (connectionInfoMissing)
-        _logger.e('   -> IP, Porta ou Token faltando.');
-      if (moduleInfoMissing)
-        _logger.e(
-            '   -> Modo de Módulo está ativo, mas o ModuleID está faltando.');
-
+        token.isEmpty) {
       lastRunStatus = "Erro: Config incompleta";
-      errorCount++;
       return;
     }
-    // --- ✅ FIM DA CORREÇÃO ---
-
-    final interval = _currentSettings!['interval'] as int? ?? 300;
-    nextRunTime = DateTime.now().add(Duration(seconds: interval));
-
-    final sector = _currentSettings!['sector'] as String?;
-    final floor = _currentSettings!['floor'] as String?;
-    final assetName = _currentSettings!['assetName'] as String?;
 
     _logger.i('🔄 EXECUTANDO CICLO DE MONITORAMENTO');
     lastRunStatus = "Sincronizando...";
 
     try {
       await _monitoringService.collectAndSendData(
-        moduleId: moduleId ?? '', // Passa o ID (ou vazio)
+        moduleId: moduleId ?? '',
         serverUrl: serverUrl,
         token: token,
-        manualSector: sector,
-        manualFloor: floor,
-        manualAssetName: assetName,
-        forceLegacyMode: forceLegacyMode, // Passa o flag
+        manualSector: _currentSettings!['sector'],
+        manualFloor: _currentSettings!['floor'],
+        manualAssetName: _currentSettings!['assetName'],
+        forceLegacyMode: forceLegacyMode,
       );
 
       _logger.i('✅ CICLO CONCLUÍDO COM SUCESSO');
       lastRunStatus = "Sucesso";
       syncCount++;
+
+      // ✅ AUTO-HEALING: Se o ciclo funcionou, garante que o polling de comandos está ativo
+      _startCommandPolling();
     } catch (e, stackTrace) {
       _logger.e('❌ ERRO NO CICLO DE MONITORAMENTO',
           error: e, stackTrace: stackTrace);
-      lastRunStatus =
-          "Erro: ${e.toString().substring(0, (e.toString().length < 50) ? e.toString().length : 50)}...";
+      lastRunStatus = "Erro: ${e.toString()}";
       errorCount++;
     }
 
@@ -159,16 +182,14 @@ class BackgroundService {
 
   Future<void> updateSettings(Map<String, dynamic> newSettings) async {
     _logger.i('🔄 Background Service: Atualizando configurações');
-
     _currentSettings ??= {};
     _currentSettings!.addAll(newSettings);
 
     _timer?.cancel();
+    runCycle(); // Roda ciclo imediato
 
-    _logger.i('⚡ Executando ciclo imediato com novas configurações...');
-
-    // Roda em segundo plano
-    runCycle();
+    // Reinicia polling com novas configurações
+    await _startCommandPolling();
 
     final intervalSeconds =
         _currentSettings!['interval'] as int? ?? _settingsService.interval;
@@ -177,18 +198,9 @@ class BackgroundService {
 
   void _scheduleNextRun(int intervalSeconds) {
     _logger.i('   Agendando próximo ciclo em $intervalSeconds segundos');
-
-    nextRunTime = DateTime.now().add(Duration(seconds: intervalSeconds));
-
     _timer = Timer(Duration(seconds: intervalSeconds), () async {
-      if (!_isRunning) {
-        _logger.w('Timer disparado, mas serviço está parado.');
-        return;
-      }
-
-      _logger.d('Timer disparado, executando ciclo...');
+      if (!_isRunning) return;
       await runCycle();
-
       if (_isRunning) {
         final currentInterval =
             _currentSettings!['interval'] as int? ?? intervalSeconds;
@@ -202,18 +214,13 @@ class BackgroundService {
     _timer = null;
     _isRunning = false;
     lastRunStatus = "Parado";
-    nextRunTime = null;
+
+    try {
+      locator<CommandExecutorService>().stopCommandPolling();
+    } catch (e) {
+      _logger.w('Erro ao parar polling: $e');
+    }
+
     _logger.i('🛑 Background Service: Parado');
-  }
-
-  void dispose() {
-    stop();
-  }
-
-  void resetCounters() {
-    syncCount = 0;
-    errorCount = 0;
-    startTime = DateTime.now();
-    _logger.i('🔄 Contadores resetados');
   }
 }
