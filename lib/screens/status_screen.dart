@@ -1,4 +1,4 @@
-// File: lib/screens/status_screen.dart (REVISADO)
+// File: lib/screens/status_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -7,13 +7,17 @@ import 'package:agent_windows/providers/agent_provider.dart';
 import 'package:agent_windows/services/background_service.dart';
 import 'package:agent_windows/services/service_locator.dart';
 import 'package:agent_windows/utils/app_logger.dart';
+import 'package:agent_windows/widgets/app_card.dart';
+import 'package:agent_windows/widgets/primary_button.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class StatusScreen extends StatefulWidget {
   const StatusScreen({super.key});
@@ -64,22 +68,21 @@ class _StatusScreenState extends State<StatusScreen> {
     final diff = dt.difference(DateTime.now());
     if (diff.isNegative) return "Agora...";
 
-    // Evita mostrar minutos negativos se estiver atrasado
     if (diff.inSeconds < 0) return "Agora...";
 
     final minutes = diff.inMinutes;
     final seconds = diff.inSeconds.remainder(60);
-    return "Em ${minutes}m ${seconds}s";
+    return "${minutes}m ${seconds}s";
   }
 
   void _showSystemInfo(BuildContext context) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A202C),
+        backgroundColor: const Color(0xFF18181B),
         title: const Row(
           children: [
-            Icon(Icons.computer, color: Colors.blue),
+            Icon(Icons.computer, color: Color(0xFF2563EB)),
             SizedBox(width: 12),
             Text('Informações do Sistema'),
           ],
@@ -118,16 +121,16 @@ class _StatusScreenState extends State<StatusScreen> {
                             width: 140,
                             child: Text(
                               '${entry.key}:',
-                              style: TextStyle(
-                                color: Colors.grey[400],
-                                fontWeight: FontWeight.bold,
+                              style: const TextStyle(
+                                color: Color(0xFFA1A1AA),
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
                           Expanded(
                             child: Text(
                               entry.value,
-                              style: const TextStyle(color: Colors.white70),
+                              style: const TextStyle(color: Color(0xFFFAFAFA)),
                             ),
                           ),
                         ],
@@ -164,7 +167,7 @@ class _StatusScreenState extends State<StatusScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A202C),
+        backgroundColor: const Color(0xFF18181B),
         title: const Text('Logs Recentes'),
         content: SizedBox(
           width: 600,
@@ -173,7 +176,7 @@ class _StatusScreenState extends State<StatusScreen> {
             reverse: true,
             child: Text(
               AppLogger.getRecentLogs(),
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 10),
+              style: GoogleFonts.firaCode(fontSize: 12, color: const Color(0xFFD4D4D8)),
             ),
           ),
         ),
@@ -266,31 +269,30 @@ class _StatusScreenState extends State<StatusScreen> {
         'http://${provider.ipController.text}:${provider.portController.text}';
 
     return Scaffold(
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: Center(
         child: SizedBox(
-          width: 800, // <-- Aumentei a largura do painel
+          width: 1000,
           child: Column(
             children: [
               _buildHeader(theme, _backgroundService.isRunning),
-
-              // === INÍCIO DA REORGANIZAÇÃO DA UI ===
               Expanded(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Linha 1: Estatísticas
+                      // Stats Row
                       _buildSyncStats(context, _backgroundService),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 24),
 
-                      // Linha 2: Duas Colunas
+                      // Main Content
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Coluna 1: Status e Configuração
+                          // Left Column
                           Expanded(
-                            flex: 3, // 3/5 do espaço
+                            flex: 3,
                             child: Column(
                               children: [
                                 _buildStatusCard(
@@ -298,47 +300,45 @@ class _StatusScreenState extends State<StatusScreen> {
                                   title: 'Status do Serviço',
                                   icon: Icons.sync,
                                   content: _buildServiceStatus(),
-                                ),
+                                ).animate().fadeIn(delay: 200.ms).slideX(),
                                 const SizedBox(height: 16),
                                 _buildStatusCard(
                                   theme: theme,
-                                  title: 'Configuração de Conexão',
-                                  icon: Icons.dns_outlined,
+                                  title: 'Configuração',
+                                  icon: Icons.settings_ethernet,
                                   content: _buildConnectionConfig(
                                       provider, serverUrl, moduleName),
-                                ),
+                                ).animate().fadeIn(delay: 300.ms).slideX(),
                               ],
                             ),
                           ),
 
-                          const SizedBox(width: 16),
+                          const SizedBox(width: 24),
 
-                          // Coluna 2: Rede e Logs
+                          // Right Column
                           Expanded(
-                            flex: 2, // 2/5 do espaço
+                            flex: 2,
                             child: Column(
                               children: [
                                 _buildStatusCard(
-                                    theme: theme,
-                                    title: 'Informações de Rede',
-                                    icon: Icons.wifi,
-                                    content: _buildNetworkInfo(),
-                                    trailing: IconButton(
-                                      // Botão de refresh
-                                      icon: const Icon(Icons.refresh,
-                                          size: 18, color: Colors.grey),
-                                      onPressed: _refreshNetworkInfo,
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                      tooltip: 'Atualizar informações de rede',
-                                    )),
+                                  theme: theme,
+                                  title: 'Rede',
+                                  icon: Icons.wifi,
+                                  content: _buildNetworkInfo(),
+                                  trailing: IconButton(
+                                    icon: const Icon(Icons.refresh,
+                                        size: 18, color: Color(0xFFA1A1AA)),
+                                    onPressed: _refreshNetworkInfo,
+                                    tooltip: 'Atualizar',
+                                  ),
+                                ).animate().fadeIn(delay: 400.ms).slideX(),
                                 const SizedBox(height: 16),
                                 _buildStatusCard(
                                   theme: theme,
-                                  title: 'Logs Recentes',
-                                  icon: Icons.article_outlined,
+                                  title: 'Logs',
+                                  icon: Icons.terminal,
                                   content: _buildLogs(theme),
-                                ),
+                                ).animate().fadeIn(delay: 500.ms).slideX(),
                               ],
                             ),
                           ),
@@ -348,9 +348,6 @@ class _StatusScreenState extends State<StatusScreen> {
                   ),
                 ),
               ),
-              // === FIM DA REORGANIZAÇÃO DA UI ===
-
-              // Rodapé com Ações
               _buildFooterActions(theme, provider),
             ],
           ),
@@ -359,11 +356,9 @@ class _StatusScreenState extends State<StatusScreen> {
     );
   }
 
-  // --- WIDGETS REATORADOS ---
-
   Widget _buildServiceStatus() {
     final statusColor =
-        _backgroundService.isRunning ? Colors.green : Colors.grey;
+        _backgroundService.isRunning ? const Color(0xFF10B981) : const Color(0xFFEF4444); // Emerald 500 : Red 500
     final provider = context.watch<AgentProvider>();
 
     return Column(
@@ -371,20 +366,34 @@ class _StatusScreenState extends State<StatusScreen> {
       children: [
         Row(
           children: [
-            Icon(
-              _backgroundService.isRunning
-                  ? Icons.check_circle
-                  : Icons.pause_circle,
-              size: 18,
-              color: statusColor,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              _backgroundService.isRunning ? 'Ativo' : 'Parado',
-              style: TextStyle(
-                color: statusColor,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: statusColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: statusColor.withOpacity(0.2)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: statusColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _backgroundService.isRunning ? 'ATIVO' : 'PARADO',
+                    style: TextStyle(
+                      color: statusColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ),
             ),
             const Spacer(),
@@ -396,17 +405,17 @@ class _StatusScreenState extends State<StatusScreen> {
               ),
           ],
         ),
-        const Divider(height: 24),
-        _buildInfoRow('Última Sincronização:',
+        const SizedBox(height: 24),
+        _buildInfoRow('Última Sincronização',
             _formatDateTime(_backgroundService.lastRunTime)),
-        const SizedBox(height: 8),
-        _buildInfoRow('Status:', _backgroundService.lastRunStatus),
-        const SizedBox(height: 8),
-        _buildInfoRow('Próxima Sincronização:',
+        const SizedBox(height: 12),
+        _buildInfoRow('Status Atual', _backgroundService.lastRunStatus),
+        const SizedBox(height: 12),
+        _buildInfoRow('Próxima Execução',
             _formatNextRun(_backgroundService.nextRunTime)),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         _buildInfoRow(
-            'Intervalo:', '${provider.selectedInterval ~/ 60} minutos'),
+            'Intervalo', '${provider.selectedInterval ~/ 60} minutos'),
       ],
     );
   }
@@ -416,27 +425,19 @@ class _StatusScreenState extends State<StatusScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildInfoRow('Servidor:', serverUrl),
-        const SizedBox(height: 8),
-        _buildInfoRow('Módulo:', moduleName),
-        const SizedBox(height: 8),
+        _buildInfoRow('Servidor', serverUrl),
+        const SizedBox(height: 12),
+        _buildInfoRow('Módulo', moduleName),
+        const SizedBox(height: 12),
         _buildInfoRow(
-            'Nome do Ativo:',
+            'Ativo',
             provider.assetNameController.text.isEmpty
-                ? 'Automático (Nome do PC)'
+                ? 'Automático'
                 : provider.assetNameController.text),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         _buildInfoRow(
-            'Setor:',
-            provider.sectorController.text.isEmpty
-                ? 'Não definido'
-                : provider.sectorController.text),
-        const SizedBox(height: 8),
-        _buildInfoRow(
-            'Andar:',
-            provider.floorController.text.isEmpty
-                ? 'Não definido'
-                : provider.floorController.text),
+            'Localização',
+            '${provider.sectorController.text.isEmpty ? 'N/A' : provider.sectorController.text} - ${provider.floorController.text.isEmpty ? 'N/A' : provider.floorController.text}'),
       ],
     );
   }
@@ -447,15 +448,14 @@ class _StatusScreenState extends State<StatusScreen> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
-              child: SizedBox(
-            height: 20,
-            width: 20,
+              child: Padding(
+            padding: EdgeInsets.all(16.0),
             child: CircularProgressIndicator(strokeWidth: 2),
           ));
         }
 
         if (snapshot.hasError) {
-          return _buildInfoRow('Erro:', 'Falha ao carregar');
+          return _buildInfoRow('Erro', 'Falha ao carregar');
         }
 
         if (snapshot.hasData) {
@@ -463,31 +463,21 @@ class _StatusScreenState extends State<StatusScreen> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (info['connection_type'] == 'WiFi') ...[
-                _buildInfoRow('Tipo:', '📶 WiFi'),
-                const SizedBox(height: 8),
-                _buildInfoRow('SSID:', info['wifi_ssid'] ?? 'N/A'),
-                const SizedBox(height: 8),
-                _buildInfoRow('BSSID:', info['bssid'] ?? 'N/A'),
-                const SizedBox(height: 8),
-                _buildInfoRow('Sinal:', info['signal'] ?? 'N/A'),
-              ] else ...[
-                _buildInfoRow(
-                    'Tipo:', '🔌 ${info['connection_type'] ?? 'N/A'}'),
-              ],
-              const SizedBox(height: 8),
-              _buildInfoRow('IP:', info['ip'] ?? 'N/A'),
-              const SizedBox(height: 8),
-              _buildInfoRow('MAC:', info['mac'] ?? 'N/A'),
+              _buildInfoRow('Tipo', info['connection_type'] ?? 'N/A'),
+              const SizedBox(height: 12),
+              _buildInfoRow('IP', info['ip'] ?? 'N/A'),
+              const SizedBox(height: 12),
+              _buildInfoRow('MAC', info['mac'] ?? 'N/A'),
+              if (info['wifi_ssid'] != 'N/A') ...[
+                const SizedBox(height: 12),
+                _buildInfoRow('SSID', info['wifi_ssid'] ?? 'N/A'),
+                const SizedBox(height: 12),
+                _buildInfoRow('Sinal', info['signal'] ?? 'N/A'),
+              ]
             ],
           );
         }
-        return const Center(
-            child: SizedBox(
-          height: 20,
-          width: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ));
+        return const SizedBox();
       },
     );
   }
@@ -497,50 +487,41 @@ class _StatusScreenState extends State<StatusScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          height: 150,
+          height: 120,
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(8),
+            color: const Color(0xFF09090B),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: const Color(0xFF27272A)),
           ),
           child: SingleChildScrollView(
             reverse: true,
             padding: const EdgeInsets.all(8),
             child: Text(
               AppLogger.getRecentLogs(),
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 9,
-                color: Colors.white70,
+              style: GoogleFonts.firaCode(
+                fontSize: 11,
+                color: const Color(0xFFD4D4D8),
               ),
             ),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
-              child: ElevatedButton.icon(
+              child: OutlinedButton(
                 onPressed: () => _showLogs(context),
-                icon: const Icon(Icons.open_in_new, size: 16),
-                label: const Text('Ver Logs Completos'),
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.colorScheme.secondary,
-                    textStyle: const TextStyle(fontSize: 12),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8)),
+                child: const Text('Expandir', style: TextStyle(fontSize: 12)),
               ),
             ),
             const SizedBox(width: 8),
             IconButton(
-              icon: const Icon(Icons.delete_outline),
+              icon: const Icon(Icons.delete_outline, size: 20),
               tooltip: 'Limpar logs',
-              color: Colors.red.withOpacity(0.8),
+              color: const Color(0xFFEF4444),
               onPressed: () {
                 AppLogger.logHistory.clear();
                 setState(() {});
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Logs limpos')),
-                );
               },
             ),
           ],
@@ -552,325 +533,227 @@ class _StatusScreenState extends State<StatusScreen> {
   Widget _buildFooterActions(ThemeData theme, AgentProvider provider) {
     return Container(
       padding: const EdgeInsets.all(24.0),
-      decoration: BoxDecoration(
-        color: theme.cardColor,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Color(0xFF27272A))),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: PrimaryButton(
+              onPressed: () {
+                _logger.i('Sincronização forçada pelo usuário');
+                _backgroundService.runCycle();
+                setState(() {});
+              },
+              text: 'Sincronizar',
+              icon: Icons.sync,
+              backgroundColor: const Color(0xFF2563EB),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: PrimaryButton(
+              onPressed: _backgroundService.isRunning
+                  ? () {
+                      _backgroundService.stop();
+                      setState(() {});
+                    }
+                  : () {
+                      _backgroundService.start();
+                      setState(() {});
+                    },
+              text: _backgroundService.isRunning ? 'Pausar' : 'Iniciar',
+              icon: _backgroundService.isRunning
+                  ? Icons.pause
+                  : Icons.play_arrow,
+              backgroundColor: _backgroundService.isRunning ? const Color(0xFFF59E0B) : const Color(0xFF10B981),
+            ),
+          ),
+          const SizedBox(width: 16),
+          IconButton(
+            onPressed: () => _showSystemInfo(context),
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'Info do Sistema',
+            color: const Color(0xFFA1A1AA),
+          ),
+          IconButton(
+            onPressed: () =>
+                context.read<AgentProvider>().enterReconfiguration(),
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Configurações',
+            color: const Color(0xFFA1A1AA),
           ),
         ],
       ),
+    ).animate().slideY(begin: 1, end: 0, delay: 600.ms);
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 120,
+          child: Text(
+            label,
+            style: const TextStyle(color: Color(0xFFA1A1AA), fontSize: 13),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value.isEmpty ? "N/D" : value,
+            style: const TextStyle(
+                fontWeight: FontWeight.w500, fontSize: 13, color: Color(0xFFFAFAFA)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatusCard({
+    required ThemeData theme,
+    required String title,
+    required IconData icon,
+    required Widget content,
+    Widget? trailing,
+  }) {
+    return AppCard(
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              Icon(icon, size: 18, color: const Color(0xFF2563EB)),
+              const SizedBox(width: 12),
               Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    _logger.i('Sincronização forçada pelo usuário');
-                    _backgroundService.runCycle();
-                    setState(() {});
-                  },
-                  icon: const Icon(Icons.sync_outlined, size: 20),
-                  label: const Text('Forçar Sincronização'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _backgroundService.isRunning
-                      ? () {
-                          _backgroundService.stop();
-                          setState(() {});
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Serviço pausado')),
-                          );
-                        }
-                      : () {
-                          _backgroundService.start();
-                          setState(() {});
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Serviço retomado')),
-                          );
-                        },
-                  icon: Icon(
-                    _backgroundService.isRunning
-                        ? Icons.pause
-                        : Icons.play_arrow,
-                    size: 20,
+              if (trailing != null) trailing,
+            ],
+          ),
+          const SizedBox(height: 20),
+          content,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeader(ThemeData theme, bool isRunning) {
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2563EB).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.shield_outlined, color: Color(0xFF2563EB), size: 28),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Agente de Monitoramento',
+                  style: GoogleFonts.inter(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFFFAFAFA),
                   ),
-                  label:
-                      Text(_backgroundService.isRunning ? 'Pausar' : 'Retomar'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _backgroundService.isRunning
-                        ? Colors.orange
-                        : Colors.green,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Sistema ativo e monitorando',
+                  style: const TextStyle(
+                    color: Color(0xFFA1A1AA),
+                    fontSize: 14,
                   ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ).animate().fadeIn().slideY(begin: -0.5, end: 0);
+  }
+
+  Widget _buildSyncStats(
+      BuildContext context, BackgroundService backgroundService) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildStatCard(
+            label: 'Último Ping',
+            value: DateFormat('HH:mm').format(backgroundService.lastRunTime ?? DateTime.now()),
+            icon: Icons.access_time,
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _buildStatCard(
+            label: 'Status',
+            value: backgroundService.isRunning ? 'Online' : 'Offline',
+            icon: Icons.wifi_tethering,
+            valueColor: backgroundService.isRunning ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _buildStatCard(
+            label: 'Falhas',
+            value: '0', // Placeholder for now
+            icon: Icons.warning_amber,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatCard({
+    required String label,
+    required String value,
+    required IconData icon,
+    Color? valueColor,
+  }) {
+    return AppCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: const Color(0xFFA1A1AA), size: 16),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Color(0xFFA1A1AA),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _showSystemInfo(context),
-                  icon: const Icon(Icons.info_outline, size: 18),
-                  label: const Text('Info do Sistema'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.grey[300],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () =>
-                      context.read<AgentProvider>().enterReconfiguration(),
-                  icon: const Icon(Icons.replay_outlined, size: 20),
-                  label: const Text('Reconfigurar'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.colorScheme.secondary,
-                  ),
-                ),
-              ),
-            ],
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor ?? const Color(0xFFFAFAFA),
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),
     );
   }
-}
-
-// Helper: Linha de Informação
-Widget _buildInfoRow(String label, String value) {
-  return Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      SizedBox(
-        width: 130, // Largura fixa para alinhamento
-        child: Text(
-          label,
-          style: TextStyle(color: Colors.grey[400], fontSize: 13),
-        ),
-      ),
-      const SizedBox(width: 8),
-      Expanded(
-        child: Text(
-          value.isEmpty ? "N/D" : value, // Garante que não fique vazio
-          style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-        ),
-      ),
-    ],
-  );
-}
-
-// Helper: Card de Status (base para os outros)
-Widget _buildStatusCard({
-  required ThemeData theme,
-  required String title,
-  required IconData icon,
-  required Widget content,
-  Widget? trailing, // Novo: widget opcional no final do header
-}) {
-  return Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: theme.cardColor.withOpacity(0.6),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 20, color: Colors.blue),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            if (trailing != null) trailing, // Adiciona o widget extra
-          ],
-        ),
-        const SizedBox(height: 16),
-        content,
-      ],
-    ),
-  );
-}
-
-// Helper: Header
-Widget _buildHeader(ThemeData theme, bool isRunning) {
-  final statusColor = isRunning ? Colors.green : Colors.grey;
-  return Container(
-    padding: const EdgeInsets.all(24),
-    decoration: BoxDecoration(
-      gradient: LinearGradient(
-        colors: [
-          theme.colorScheme.primary.withOpacity(0.1),
-          theme.scaffoldBackgroundColor,
-        ],
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-      ),
-    ),
-    child: Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primary.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(Icons.shield_outlined,
-              color: theme.colorScheme.primary, size: 32),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Agente de Monitoramento',
-                style: theme.textTheme.titleLarge,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Sistema de coleta automática de dados',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: Colors.grey[400],
-                ),
-              ),
-            ],
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: statusColor.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: statusColor, width: 2),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isRunning ? Icons.check_circle : Icons.pause_circle,
-                size: 18,
-                color: statusColor,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                isRunning ? 'Ativo' : 'Parado',
-                style: TextStyle(
-                  color: statusColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-// Helper: Stats
-Widget _buildSyncStats(
-    BuildContext context, BackgroundService backgroundService) {
-  final theme = Theme.of(context);
-  return Row(
-    children: [
-      Expanded(
-        child: _buildStatCard(
-          theme: theme,
-          icon: Icons.check_circle_outline,
-          label: 'Sincronizações',
-          value: '${backgroundService.syncCount}',
-          color: Colors.green,
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: _buildStatCard(
-          theme: theme,
-          icon: Icons.error_outline,
-          label: 'Erros',
-          value: '${backgroundService.errorCount}',
-          color: Colors.red,
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: _buildStatCard(
-          theme: theme,
-          icon: Icons.schedule,
-          label: 'Uptime',
-          value: _formatUptime(backgroundService.startTime),
-          color: Colors.blue,
-        ),
-      ),
-    ],
-  );
-}
-
-Widget _buildStatCard({
-  required ThemeData theme,
-  required IconData icon,
-  required String label,
-  required String value,
-  required Color color,
-}) {
-  return Container(
-    padding: const EdgeInsets.all(12),
-    decoration: BoxDecoration(
-      color: color.withOpacity(0.1),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: color.withOpacity(0.3)),
-    ),
-    child: Column(
-      children: [
-        Icon(icon, color: color, size: 20),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.grey[400],
-            fontSize: 11,
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-String _formatUptime(DateTime? startTime) {
-  if (startTime == null) return "N/A";
-  final duration = DateTime.now().difference(startTime);
-  final hours = duration.inHours;
-  final minutes = duration.inMinutes.remainder(60);
-  return "${hours}h ${minutes}m";
 }
