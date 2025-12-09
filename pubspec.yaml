@@ -16,6 +16,7 @@ dependencies:
   flutter_background_service: ^5.0.0
   system_tray: ^2.0.3
   window_manager: ^0.5.1
+  web_socket_channel: ^3.0.0
 
   # Gerenciamento de Estado
   provider: ^6.1.2 

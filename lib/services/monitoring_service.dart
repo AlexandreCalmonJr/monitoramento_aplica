@@ -85,6 +85,11 @@ class MonitoringService {
     }
   }
 
+  /// Public method for collecting system information (used for testing)
+  Future<Map<String, dynamic>> collectSystemInfo() async {
+    return await _getCoreSystemInfo();
+  }
+
   Future<Map<String, dynamic>> _getCoreSystemInfo() async {
     final stdoutString = await _runScript('get_core_system_info.ps1');
 
@@ -440,6 +445,27 @@ class MonitoringService {
           payload['battery_health'] =
               payload['battery_health'] ?? 'Não detectada';
         }
+        break;
+
+      case 'panel':
+        _logger.i('📺 Preparando dados de Painel...');
+        // Remove dados irrelevantes para painel
+        payload.remove('battery_level');
+        payload.remove('battery_health');
+        payload.remove('biometric_reader');
+
+        // Adiciona dados específicos de painel (com defaults se não disponíveis)
+        payload['screen_size'] = payload['screen_size'] ?? 'N/A';
+        payload['resolution'] =
+            payload['resolution'] ?? '1920x1080'; // Default comum
+        payload['brightness'] = 100; // Default
+        payload['volume'] = 50; // Default
+        payload['hdmi_input'] = 'HDMI 1'; // Default
+        payload['firmware_version'] = payload['os_version'] ?? 'N/A';
+        payload['is_online'] = true;
+        payload['current_content'] = 'Default Playlist'; // Default
+        payload['content_last_updated'] = DateTime.now().toIso8601String();
+        payload['connected_devices'] = [];
         break;
     }
 

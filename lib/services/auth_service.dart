@@ -1,10 +1,12 @@
 // File: lib/services/auth_service.dart
+import 'package:agent_windows/services/settings_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:logger/src/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
   // Construtor público
-  AuthService() {
+  AuthService(Logger logger, SettingsService settingsService) {
     debugPrint('AuthService inicializado');
   }
 

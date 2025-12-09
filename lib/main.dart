@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:agent_windows/providers/agent_provider.dart';
 import 'package:agent_windows/services/background_service.dart';
 import 'package:agent_windows/services/service_locator.dart';
+import 'package:agent_windows/services/settings_service.dart';
 import 'package:agent_windows/services/system_tray_service.dart';
+import 'package:agent_windows/services/websocket_service.dart';
 import 'package:agent_windows/utils/app_logger.dart';
 import 'package:agent_windows/utils/window_listener.dart';
 import 'package:agent_windows/widgets/home_screen_router.dart';
@@ -43,8 +45,16 @@ Future<void> main() async {
   try {
     await locator<BackgroundService>().initialize();
     logger.i('Background Service inicializado');
+
+    // Inicializa WebSocket
+    final settings = locator<SettingsService>();
+    await settings.loadSettings(); // Garante que as configs estão carregadas
+    if (settings.ip.isNotEmpty && settings.port.isNotEmpty) {
+      final wsUrl = 'http://${settings.ip}:${settings.port}';
+      locator<WebSocketService>().connect(wsUrl);
+    }
   } catch (e) {
-    logger.e('Erro ao inicializar Background Service: $e');
+    logger.e('Erro ao inicializar serviços: $e');
   }
 
   // 5. Configuração da bandeja do sistema (System Tray)

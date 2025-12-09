@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:agent_windows/services/auth_service.dart';
+import 'package:agent_windows/services/settings_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
 
@@ -12,7 +13,7 @@ class CommandExecutorService {
   Timer? _pollingTimer;
   bool _isExecuting = false;
 
-  CommandExecutorService(this._logger, this._authService);
+  CommandExecutorService(this._logger, this._authService, SettingsService settingsService);
 
   /// Inicia o polling de comandos (chamado periodicamente)
   void startCommandPolling({
